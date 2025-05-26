@@ -20,7 +20,7 @@ class GraphSAGE(torch.nn.Module):
         return self.conv2(x, edge_index)
 
 def decode(z, edge_index):
-    return (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)
+    return (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)  # Good 'ol dot product
 
 # 3. Train loop
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -38,7 +38,7 @@ for epoch in range(1, 101):
     model.train()
     optimizer.zero_grad()
     z = model(x, edge_index)
-
+    
     # Positive and negative edges
     pos_score = decode(z, train_pos)
     neg_edge_index = negative_sampling(edge_index=edge_index,
