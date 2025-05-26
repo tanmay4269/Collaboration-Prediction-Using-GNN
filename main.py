@@ -1,5 +1,7 @@
 import torch
+from torch.optim import lr_scheduler
 from torch_geometric.utils import negative_sampling
+
 from sklearn.metrics import roc_auc_score
 
 from model import GraphSAGE, LinkPredictor
@@ -7,7 +9,7 @@ from dataset import OpenAlexGraphDataset
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json")
+dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1)
 
 train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
@@ -58,13 +60,16 @@ def evaluate(data, model, link_predictor):
 
 model = GraphSAGE(train_graph_data.x.size(-1), 128).to(device)
 link_predictor = LinkPredictor(model.conv2.out_channels, train_graph_data.edge_attr.size(-1)).to(device)
-optimizer = torch.optim.Adam(list(model.parameters()) + list(link_predictor.parameters()), lr=0.001)
+optimizer = torch.optim.Adam(list(model.parameters()) + list(link_predictor.parameters()), lr=0.01)
+
+num_epochs = 50
+scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1.0, total_iters=num_epochs)
 
 print("Starting training...")
-for epoch in range(1, 101):
+for epoch in range(1, num_epochs + 1):
     loss = train(train_graph_data, model, link_predictor, optimizer)
     
-    if epoch % 2 == 0:
+    if epoch % 10 == 0:
         val_auc = evaluate(val_graph_data, model, link_predictor)
         print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
 

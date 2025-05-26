@@ -61,6 +61,9 @@ class OpenAlexGraphDataset:
                         G[id_1][id_2]["title"] = [authors[i]["title"]]
                         G[id_1][id_2]["publication_dates"] = [publication_date]
                         
+        if max_num_nodes < 0:
+            return G
+
         degrees = dict(G.degree())
         sorted_nodes = sorted(degrees.items(), key=lambda item: item[1])
         nodes_to_remove_count = G.number_of_nodes() - max_num_nodes
