@@ -153,7 +153,7 @@ class OpenAlexGraphDataset:
         return self.test_data
 
 if __name__ == "__main__":
-    dataset_builder = OpenAlexGraphDataset(json_path="../data/openalex_cs_papers.json")
+    dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json")
     
     train_graph_data = dataset_builder.get_train_data()
     val_graph_data = dataset_builder.get_val_data()
