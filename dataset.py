@@ -1,3 +1,4 @@
+import os
 import json
 from datetime import datetime
 
@@ -15,8 +16,42 @@ class OpenAlexGraphDataset:
         self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
         print("Done!")
 
+        print("Building datasets...")
         G = self._build_networkx_graph(json_path, max_num_nodes=num_authors)
         self.train_data, self.val_data, self.test_data = self._create_splits(G)
+        print("Done!")
+
+    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200, cache_dir="cache"):
+        self.cache_dir = cache_dir
+        os.makedirs(self.cache_dir, exist_ok=True)
+
+        self.train_cache_path = os.path.join(self.cache_dir, "train_data.pt")
+        self.val_cache_path = os.path.join(self.cache_dir, "val_data.pt")
+        self.test_cache_path = os.path.join(self.cache_dir, "test_data.pt")
+
+        if os.path.exists(self.train_cache_path) and \
+           os.path.exists(self.val_cache_path) and \
+           os.path.exists(self.test_cache_path):
+            print("Loading cached data...")
+            self.train_data = torch.load(self.train_cache_path, weights_only=False)
+            self.val_data = torch.load(self.val_cache_path, weights_only=False)
+            self.test_data = torch.load(self.test_cache_path, weights_only=False)
+            print("Done!")
+        else:
+            print("Loading sentence model...")
+            self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("Done!")
+
+            print("Building datasets...")
+            G = self._build_networkx_graph(json_path, max_num_nodes=num_authors)
+            self.train_data, self.val_data, self.test_data = self._create_splits(G)
+            print("Done!")
+
+            print(f"Saving processed data to {self.cache_dir}...")
+            torch.save(self.train_data, self.train_cache_path)
+            torch.save(self.val_data, self.val_cache_path)
+            torch.save(self.test_data, self.test_cache_path)
+            print("Done!")
     
     def _build_networkx_graph(self, json_path, max_num_nodes):
         G = nx.Graph()
@@ -154,43 +189,3 @@ class OpenAlexGraphDataset:
 
     def get_test_data(self):
         return self.test_data
-
-if __name__ == "__main__":
-    dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json")
-    
-    train_graph_data = dataset_builder.get_train_data()
-    val_graph_data = dataset_builder.get_val_data()
-    test_graph_data = dataset_builder.get_test_data()
-
-    print("---")
-    print("Train Dataset Information:")
-    print(f"Number of nodes: {train_graph_data.num_nodes}")
-    print(f"Number of edges: {train_graph_data.num_edges}")
-    print(f"Node feature shape: {train_graph_data.x.shape}")
-    print(f"Edge index shape: {train_graph_data.edge_index.shape}")
-    print(f"Edge attribute shape: {train_graph_data.edge_attr.shape}")
-    print(f"Node features device: {train_graph_data.x.device}")
-    print(f"Edge index device: {train_graph_data.edge_index.device}")
-    print(f"Edge attribute device: {train_graph_data.edge_attr.device}")
-
-    print("---")
-    print("Validation Dataset Information:")
-    print(f"Number of nodes: {val_graph_data.num_nodes}")
-    print(f"Number of edges: {val_graph_data.num_edges}")
-    print(f"Node feature shape: {val_graph_data.x.shape}")
-    print(f"Edge index shape: {val_graph_data.edge_index.shape}")
-    print(f"Edge attribute shape: {val_graph_data.edge_attr.shape}")
-    print(f"Node features device: {val_graph_data.x.device}")
-    print(f"Edge index device: {val_graph_data.edge_index.device}")
-    print(f"Edge attribute device: {val_graph_data.edge_attr.device}")
-
-    print("---")
-    print("Test Dataset Information:")
-    print(f"Number of nodes: {test_graph_data.num_nodes}")
-    print(f"Number of edges: {test_graph_data.num_edges}")
-    print(f"Node feature shape: {test_graph_data.x.shape}")
-    print(f"Edge index shape: {test_graph_data.edge_index.shape}")
-    print(f"Edge attribute shape: {test_graph_data.edge_attr.shape}")
-    print(f"Node features device: {test_graph_data.x.device}")
-    print(f"Edge index device: {test_graph_data.edge_index.device}")
-    print(f"Edge attribute device: {test_graph_data.edge_attr.device}")
