@@ -11,17 +11,7 @@ from torch_geometric.data import Data
 from sentence_transformers import SentenceTransformer
 
 class OpenAlexGraphDataset:
-    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200):
-        print("Loading sentence model...")
-        self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-        print("Done!")
-
-        print("Building datasets...")
-        G = self._build_networkx_graph(json_path, max_num_nodes=num_authors)
-        self.train_data, self.val_data, self.test_data = self._create_splits(G)
-        print("Done!")
-
-    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200, cache_dir="cache"):
+    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200, cache_dir="cache", use_cache=True):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
 
@@ -29,9 +19,11 @@ class OpenAlexGraphDataset:
         self.val_cache_path = os.path.join(self.cache_dir, "val_data.pt")
         self.test_cache_path = os.path.join(self.cache_dir, "test_data.pt")
 
-        if os.path.exists(self.train_cache_path) and \
-           os.path.exists(self.val_cache_path) and \
-           os.path.exists(self.test_cache_path):
+        if use_cache and (
+            os.path.exists(self.train_cache_path) and \
+            os.path.exists(self.val_cache_path) and \
+            os.path.exists(self.test_cache_path)
+        ):
             print("Loading cached data...")
             self.train_data = torch.load(self.train_cache_path, weights_only=False)
             self.val_data = torch.load(self.val_cache_path, weights_only=False)
