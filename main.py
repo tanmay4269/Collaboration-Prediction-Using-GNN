@@ -1,11 +1,16 @@
 import torch
-from torch.optim import lr_scheduler
 from torch_geometric.utils import negative_sampling
 
 from sklearn.metrics import roc_auc_score
 
 from model import GraphSAGE, LinkPredictor
 from dataset import OpenAlexGraphDataset
+
+# Config
+BASE_LR = 0.01
+
+NUM_EPOCHS = 70
+LOG_EVERY = 10  # Epochs
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -15,6 +20,34 @@ train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
 test_graph_data = dataset_builder.get_test_data()
 
+def custom_negative_sampling(mode, num_neg_samples):
+    edge_index = None
+    num_nodes = train_graph_data.num_nodes
+
+    if mode == 'train':
+        edge_index = torch.cat([
+            train_graph_data.edge_index,
+            val_graph_data.edge_index,
+            test_graph_data.edge_index
+        ], dim=1)
+    elif mode == 'val':
+        edge_index = torch.cat([
+            val_graph_data.edge_index,
+            test_graph_data.edge_index
+        ], dim=1) 
+    else:
+        edge_index = test_graph_data.edge_index
+
+    neg_edge_index = negative_sampling(
+        edge_index=edge_index,
+        num_nodes=num_nodes,
+        num_neg_samples=num_neg_samples,
+        method='sparse'
+    )
+
+    return neg_edge_index
+    
+
 def train(data, model, link_predictor, optimizer):
     model.train()
     link_predictor.train()
@@ -22,12 +55,8 @@ def train(data, model, link_predictor, optimizer):
     z = model(data.x, data.edge_index)
     
     pos_score = link_predictor(z, data.edge_index, data.edge_attr)
-    neg_edge_index = negative_sampling(
-        edge_index=data.edge_index,
-        num_nodes=data.num_nodes,
-        num_neg_samples=pos_score.size(0),
-        method='sparse'
-    )
+
+    neg_edge_index = custom_negative_sampling('train', pos_score.size(0))
     neg_score = link_predictor(z, neg_edge_index, None)
 
     score = torch.cat([pos_score, neg_score])
@@ -37,20 +66,16 @@ def train(data, model, link_predictor, optimizer):
     optimizer.step()
     return loss.item()
 
+
 @torch.no_grad()
-def evaluate(data, model, link_predictor):
+def evaluate(data, model, link_predictor, mode):
     model.eval()
     link_predictor.eval()
     z = model(data.x, data.edge_index)
 
     pos_pred = link_predictor(z, data.edge_index, data.edge_attr).sigmoid()
     
-    neg_edge_index = negative_sampling(
-        edge_index=data.edge_index,
-        num_nodes=data.num_nodes,
-        num_neg_samples=pos_pred.size(0),
-        method='sparse'
-    )
+    neg_edge_index = custom_negative_sampling(mode, pos_pred.size(0))
     neg_pred = link_predictor(z, neg_edge_index, None).sigmoid()
 
     y_pred = torch.cat([pos_pred, neg_pred]).cpu()
@@ -58,21 +83,19 @@ def evaluate(data, model, link_predictor):
 
     return roc_auc_score(y_true, y_pred)
 
+
 model = GraphSAGE(train_graph_data.x.size(-1), 128).to(device)
 link_predictor = LinkPredictor(model.conv2.out_channels, train_graph_data.edge_attr.size(-1)).to(device)
-optimizer = torch.optim.Adam(list(model.parameters()) + list(link_predictor.parameters()), lr=0.01)
-
-num_epochs = 50
-scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1.0, total_iters=num_epochs)
+optimizer = torch.optim.Adam(list(model.parameters()) + list(link_predictor.parameters()), lr=BASE_LR)
 
 print("Starting training...")
-for epoch in range(1, num_epochs + 1):
+for epoch in range(NUM_EPOCHS):
     loss = train(train_graph_data, model, link_predictor, optimizer)
-    
-    if epoch % 10 == 0:
-        val_auc = evaluate(val_graph_data, model, link_predictor)
-        print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
+
+    if epoch % LOG_EVERY == LOG_EVERY-1:
+        val_auc = evaluate(val_graph_data, model, link_predictor, mode='val')
+        print(f'Epoch {epoch+1:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
 
 print("\nTesting...")
-test_auc = evaluate(test_graph_data, model, link_predictor)
+test_auc = evaluate(test_graph_data, model, link_predictor, mode='test')
 print(f"Test AUC: {test_auc:.4f}")

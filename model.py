@@ -23,10 +23,8 @@ class LinkPredictor(torch.nn.Module):
         z_i = z[edge_index[0]]
         z_j = z[edge_index[1]]
 
-        if edge_attr is not None:
-            x = torch.cat([z_i, z_j, edge_attr], dim=-1)
-        else:
-            zero_edge_attr = torch.zeros(z_i.size(0), self.lin.in_features - 2 * z.size(-1), device=z.device)
-            x = torch.cat([z_i, z_j, zero_edge_attr], dim=-1)
+        if edge_attr is None:
+            edge_attr = torch.zeros(z_i.size(0), self.lin.in_features - 2 * z.size(-1), device=z.device)
         
+        x = torch.cat([z_i, z_j, edge_attr], dim=-1)
         return self.lin(x).view(-1)
