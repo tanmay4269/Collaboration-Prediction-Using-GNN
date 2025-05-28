@@ -18,8 +18,7 @@ LOG_EVERY = 10  # Epochs
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
-os._exit()
+dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=True)
 
 train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
@@ -90,13 +89,15 @@ optimizer = torch.optim.Adam(model.parameters(), lr=BASE_LR)
 scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=END_LR_FACTOR, total_iters=NUM_EPOCHS)
 
 print("Starting training...")
+loss = 0
 for epoch in range(NUM_EPOCHS):
+
+    if epoch % LOG_EVERY == 0:
+        val_auc = evaluate(val_graph_data, model)
+        print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
+
     loss = train(train_graph_data, model, optimizer)
     scheduler.step()
-
-    if epoch % LOG_EVERY == LOG_EVERY-1:
-        val_auc = evaluate(val_graph_data, model)
-        print(f'Epoch {epoch+1:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
 
 print("\nTesting...")
 test_auc = evaluate(test_graph_data, model)
