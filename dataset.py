@@ -72,10 +72,12 @@ class OpenAlexGraphDataset:
                     G.add_node(
                         author_id,
                         affiliated_institution=affiliation,
-                        citation_count=cited_by
+                        citation_count=cited_by,
+                        work_count=1
                     )
                 else:
                     G.nodes[author_id]["citation_count"] += cited_by
+                    G.nodes[author_id]["work_count"] += 1
 
             for i in range(len(authors)):
                 for j in range(i + 1, len(authors)):
@@ -91,8 +93,9 @@ class OpenAlexGraphDataset:
         if max_num_nodes < 0:
             return G
 
-        degrees = dict(G.degree())
-        sorted_nodes = sorted(degrees.items(), key=lambda item: item[1])
+        # Filter based on work_count
+        work_counts = {node: G.nodes[node]["work_count"] for node in G.nodes()}
+        sorted_nodes = sorted(work_counts.items(), key=lambda item: item[1])
         nodes_to_remove_count = G.number_of_nodes() - max_num_nodes
         nodes_to_remove = [node for node, _ in sorted_nodes[:nodes_to_remove_count]]
         nodes_to_retain = [node for node in G.nodes() if node not in nodes_to_remove]
