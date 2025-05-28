@@ -4,11 +4,13 @@ from sklearn.metrics import roc_auc_score
 from model import LinkPredictionModel
 from dataset import OpenAlexGraphDataset
 
-# Config
-BASE_LR = 0.005
-END_LR_FACTOR = 1.0
-NUM_EPOCHS = 50
-LOG_EVERY = 10
+# Config - Reduced learning rate and added weight decay
+BASE_LR = 0.001  # Reduced from 0.005
+WEIGHT_DECAY = 1e-4  # Added regularization
+NUM_EPOCHS = 100  # Increased epochs
+LOG_EVERY = 5  # Less frequent logging
+PATIENCE = 15  # Early stopping patience
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load dataset
@@ -17,14 +19,9 @@ train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
 test_graph_data = dataset_builder.get_test_data()
 
-# Move data to device
-train_graph_data = train_graph_data.to(device)
-val_graph_data = val_graph_data.to(device)
-test_graph_data = test_graph_data.to(device)
-
-# Pre-generate negative samples for validation and test (fixed across epochs)
+# Pre-compute negative edges for validation and test
 val_neg_edge_index = negative_sampling(
-    edge_index=train_graph_data.edge_index,  # Only use train edges
+    edge_index=train_graph_data.edge_index,
     num_nodes=train_graph_data.num_nodes,
     num_neg_samples=val_graph_data.edge_index.size(1),
     method='sparse'
@@ -41,13 +38,9 @@ def train(data, model, optimizer):
     model.train()
     optimizer.zero_grad()
     
-    # Get embeddings
     z = model(data.x, data.edge_index, data.edge_attr)
     
-    # Positive edges
     pos_score = model.decode(z, data.edge_index)
-    
-    # Generate negative samples (only using train edges)
     neg_edge_index = negative_sampling(
         edge_index=data.edge_index,
         num_nodes=data.num_nodes,
@@ -58,80 +51,86 @@ def train(data, model, optimizer):
     
     # Combine scores and labels
     score = torch.cat([pos_score, neg_score])
-    labels = torch.cat([
-        torch.ones(pos_score.size(0), device=device),
-        torch.zeros(neg_score.size(0), device=device)
-    ])
+    labels = torch.cat([torch.ones(pos_score.size(0)), torch.zeros(neg_score.size(0))]).to(device)
     
-    # Compute loss
+    # Use BCE with logits loss
     loss = torch.nn.functional.binary_cross_entropy_with_logits(score, labels)
-    loss.backward()
-    optimizer.step()
     
+    loss.backward()
+    
+    # Gradient clipping to prevent exploding gradients
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    
+    optimizer.step()
     return loss.item()
 
 @torch.no_grad()
-def evaluate(data, neg_edge_index, model, known_edges):
+def evaluate(data, model, neg_edge_index):
     model.eval()
+    z = model(data.x, data.edge_index, data.edge_attr)
     
-    # Get embeddings using only known edges
-    z = model(data.x, known_edges, data.edge_attr if hasattr(data, 'edge_attr') else None)
-    
-    # Predict on positive edges
     pos_pred = model.decode(z, data.edge_index)
-    
-    # Predict on negative edges
     neg_pred = model.decode(z, neg_edge_index)
     
-    # Combine predictions
     y_pred = torch.cat([pos_pred, neg_pred]).cpu()
-    y_true = torch.cat([
-        torch.ones(pos_pred.size(0)),
-        torch.zeros(neg_pred.size(0))
-    ]).cpu()
+    y_true = torch.cat([torch.ones(pos_pred.size(0)), torch.zeros(neg_pred.size(0))]).cpu()
     
     return roc_auc_score(y_true, y_pred)
 
-# Initialize model
+# Model initialization
 NODE_FEAT_DIM = train_graph_data.x.size(-1)
-EDGE_FEAT_DIM = train_graph_data.edge_attr.size(-1) if hasattr(train_graph_data, 'edge_attr') else 0
-HIDDEN_CHANNELS = 64  # Increased
-OUT_CHANNELS = 16     # Increased
+EDGE_FEAT_DIM = train_graph_data.edge_attr.size(-1)
+HIDDEN_CHANNELS = 64  # Increased from 32
+OUT_CHANNELS = 32     # Increased from 8
 
 model = LinkPredictionModel(NODE_FEAT_DIM, EDGE_FEAT_DIM, HIDDEN_CHANNELS, OUT_CHANNELS).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=BASE_LR)
-scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=END_LR_FACTOR, total_iters=NUM_EPOCHS)
 
-# Training loop
-print("Starting training...")
+# Improved optimizer with weight decay
+optimizer = torch.optim.Adam(model.parameters(), lr=BASE_LR, weight_decay=WEIGHT_DECAY)
+
+# Better learning rate scheduler
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode='max', factor=0.5, patience=10, verbose=True
+)
+
+# Early stopping
 best_val_auc = 0
+patience_counter = 0
+
+print("Starting training...")
+print(f"Train edges: {train_graph_data.edge_index.size(1)}")
+print(f"Val edges: {val_graph_data.edge_index.size(1)}")
+print(f"Test edges: {test_graph_data.edge_index.size(1)}")
+print(f"Nodes: {train_graph_data.num_nodes}")
+
 for epoch in range(NUM_EPOCHS):
     loss = train(train_graph_data, model, optimizer)
     
     if epoch % LOG_EVERY == 0:
-        # Evaluate on validation set
-        val_auc = evaluate(val_graph_data, val_neg_edge_index, model, train_graph_data.edge_index)
+        val_auc = evaluate(val_graph_data, model, val_neg_edge_index)
         
-        print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f}')
+        print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
+        # Learning rate scheduling
+        scheduler.step(val_auc)
+        
+        # Early stopping
         if val_auc > best_val_auc:
             best_val_auc = val_auc
-            torch.save(model.state_dict(), 'best_model.pth')
-    
-    scheduler.step()
+            patience_counter = 0
+            # Save best model
+            torch.save(model.state_dict(), 'best_model.pt')
+        else:
+            patience_counter += 1
+            
+        if patience_counter >= PATIENCE:
+            print(f"Early stopping at epoch {epoch}")
+            break
 
-# Load best model and test
-model.load_state_dict(torch.load('best_model.pth'))
-test_auc = evaluate(test_graph_data, test_neg_edge_index, model, 
-                   torch.cat([train_graph_data.edge_index, val_graph_data.edge_index], dim=1))
+# Load best model for testing
+model.load_state_dict(torch.load('best_model.pt'))
+print(f"\nBest validation AUC: {best_val_auc:.4f}")
 
-print(f"\nFinal Test AUC: {test_auc:.4f}")
-
-# Additional diagnostics
-print(f"Train edges: {train_graph_data.edge_index.size(1)}")
-print(f"Val edges: {val_graph_data.edge_index.size(1)}")
-print(f"Test edges: {test_graph_data.edge_index.size(1)}")
-print(f"Number of nodes: {train_graph_data.num_nodes}")
-print(f"Node feature dim: {NODE_FEAT_DIM}")
-if EDGE_FEAT_DIM > 0:
-    print(f"Edge feature dim: {EDGE_FEAT_DIM}")
+print("Testing...")
+test_auc = evaluate(test_graph_data, model, test_neg_edge_index)
+print(f"Test AUC: {test_auc:.4f}")
