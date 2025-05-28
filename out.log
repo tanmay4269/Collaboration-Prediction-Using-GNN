@@ -1,0 +1,36 @@
+/home/tvg/miniconda3/envs/ml-graphs/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+Loading sentence model...
+Done!
+Building datasets...
+Done!
+Saving processed data to cache...
+Done!
+Starting training...
+Train edges: 28254
+Val edges: 9076
+Test edges: 9543
+Nodes: 2070
+Untrained Val AUC: 0.9560
+Untrained Test AUC: 0.9803
+Epoch 000 | Loss: 2.5187 | Val AUC: 0.9602 | LR: 0.001000
+Epoch 005 | Loss: 1.2406 | Val AUC: 0.2939 | LR: 0.001000
+Epoch 010 | Loss: 0.9086 | Val AUC: 0.2206 | LR: 0.001000
+Epoch 015 | Loss: 0.6690 | Val AUC: 0.2852 | LR: 0.001000
+Epoch 020 | Loss: 0.6392 | Val AUC: 0.3428 | LR: 0.001000
+Epoch 025 | Loss: 0.5829 | Val AUC: 0.4341 | LR: 0.001000
+Epoch 030 | Loss: 0.5957 | Val AUC: 0.5322 | LR: 0.001000
+Epoch 035 | Loss: 0.5742 | Val AUC: 0.7440 | LR: 0.001000
+Epoch 040 | Loss: 0.5542 | Val AUC: 0.7439 | LR: 0.001000
+Epoch 045 | Loss: 0.5270 | Val AUC: 0.7452 | LR: 0.001000
+Epoch 050 | Loss: 0.5206 | Val AUC: 0.7439 | LR: 0.001000
+Epoch 055 | Loss: 0.5165 | Val AUC: 0.7510 | LR: 0.001000
+Epoch 060 | Loss: 0.5078 | Val AUC: 0.7563 | LR: 0.000500
+Epoch 065 | Loss: 0.5323 | Val AUC: 0.7563 | LR: 0.000500
+Epoch 070 | Loss: 0.4836 | Val AUC: 0.7568 | LR: 0.000500
+Epoch 075 | Loss: 0.5014 | Val AUC: 0.7585 | LR: 0.000500
+Early stopping at epoch 75
+
+Best validation AUC: 0.9602
+Testing...
+Test AUC: 0.9768

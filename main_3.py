@@ -31,8 +31,7 @@ PATIENCE = 15  # Early stopping patience
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load dataset
-dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=True)
-# dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
+dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
 train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
 test_graph_data = dataset_builder.get_test_data()
@@ -59,13 +58,33 @@ def train(data, model, optimizer):
     z = model(data.x, data.edge_index, data.edge_attr)
     
     pos_score = model.decode(z, data.edge_index)
+    
+    # Better negative sampling - avoid completely random pairs
+    # Sample negatives from nodes that at least appear in the training graph
+    existing_nodes = torch.unique(data.edge_index.flatten())
+    
     neg_edge_index = negative_sampling(
         edge_index=data.edge_index,
         num_nodes=data.num_nodes,
         num_neg_samples=pos_score.size(0),
         method='sparse'
     )
-    neg_score = model.decode(z, neg_edge_index)
+    
+    # Filter negatives to only include nodes that exist in training
+    valid_neg_mask = torch.isin(neg_edge_index[0], existing_nodes) & torch.isin(neg_edge_index[1], existing_nodes)
+    if valid_neg_mask.sum() > 0:
+        neg_edge_index = neg_edge_index[:, valid_neg_mask]
+        if neg_edge_index.size(1) < pos_score.size(0):
+            # If we don't have enough valid negatives, sample more
+            additional_negs = negative_sampling(
+                edge_index=data.edge_index,
+                num_nodes=data.num_nodes,
+                num_neg_samples=pos_score.size(0) - neg_edge_index.size(1),
+                method='sparse'
+            )
+            neg_edge_index = torch.cat([neg_edge_index, additional_negs], dim=1)
+    
+    neg_score = model.decode(z, neg_edge_index[:, :pos_score.size(0)])
     
     # Combine scores and labels
     score = torch.cat([pos_score, neg_score])
@@ -121,7 +140,6 @@ print(f"Val edges: {val_graph_data.edge_index.size(1)}")
 print(f"Test edges: {test_graph_data.edge_index.size(1)}")
 print(f"Nodes: {train_graph_data.num_nodes}")
 
-
 val_auc = evaluate(val_graph_data, model, val_neg_edge_index)
 print(f"Untrained Val AUC: {val_auc:.4f}")
 
@@ -151,7 +169,6 @@ for epoch in range(NUM_EPOCHS):
         if patience_counter >= PATIENCE:
             print(f"Early stopping at epoch {epoch}")
             break
-    
 
 # Load best model for testing
 model.load_state_dict(torch.load('best_model.pt'))
