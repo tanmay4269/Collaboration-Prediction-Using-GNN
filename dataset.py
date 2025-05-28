@@ -11,7 +11,13 @@ from torch_geometric.data import Data
 from sentence_transformers import SentenceTransformer
 
 class OpenAlexGraphDataset:
-    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200, cache_dir="cache", use_cache=True):
+    def __init__(
+        self, 
+        json_path="data/openalex_cs_papers.json", 
+        num_authors=200, 
+        cache_dir="cache", 
+        use_cache=True
+    ):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
 
@@ -101,7 +107,7 @@ class OpenAlexGraphDataset:
 
         return G.subgraph(nodes_to_retain).copy()
         
-    def _process_node_features(self, G, min_date, max_date):
+    def _process_node_features(self, G, max_date):
         max_citations = np.max([G.nodes[node_id]['citation_count'] for node_id in G.nodes()])
         # institution_names = [G.nodes[node_id]['affiliated_institution'] for node_id in G.nodes()]
         # institution_embeddings = self.sentence_model.encode(institution_names, convert_to_tensor=True).to('cuda')
@@ -113,7 +119,7 @@ class OpenAlexGraphDataset:
             data = G.nodes[node_id]["work_data"]
             filtered_titles = []
             for title, date in data:
-                if date >= min_date and date <= max_date:  # ! check if it works
+                if date <= max_date:
                     filtered_titles.append(title)
 
             filtered_author_titles.append(filtered_titles)
@@ -125,7 +131,7 @@ class OpenAlexGraphDataset:
         all_title_embeddings = []
         for work_data in filtered_author_titles:
             n = len(work_data)
-            all_title_embeddings.append(title_embeddings[i:i+n].mean(dim=1))  # ! check dim
+            all_title_embeddings.append(title_embeddings[i:i+n].mean(dim=0))  # ! check dim
             i += n
 
         assert len(all_title_embeddings) == len(G.nodes()), "Title embeddings' messed up"
@@ -139,7 +145,7 @@ class OpenAlexGraphDataset:
         
         node_features = torch.stack(node_features_list)
         node_to_idx = {node: i for i, node in enumerate(G.nodes())}
-        return node_features, node_to_idx
+        return node_to_idx, node_features
 
     def _process_edge_features(self, G, node_to_idx, edges_to_include, return_feats=False):
         edge_list = [(u, v) for u, v in edges_to_include]
@@ -185,26 +191,44 @@ class OpenAlexGraphDataset:
         train_edges_with_dates = all_edges_with_dates[:train_end_idx]
         val_edges_with_dates = all_edges_with_dates[train_end_idx:val_end_idx]
         test_edges_with_dates = all_edges_with_dates[val_end_idx:]
-
+        
         train_edges = list(set([edge for edge, _ in train_edges_with_dates]))
         val_edges = list(set([edge for edge, _ in val_edges_with_dates]))
         test_edges = list(set([edge for edge, _ in test_edges_with_dates]))
+
+        assert add_edge_attr == False
+        # node_features, node_to_idx = self._process_node_features(G)  # Will probably not work in this branch, not ment to be used either
+
+        # train_edge_indices, train_edge_features = self._process_edge_features(G, node_to_idx, train_edges)
+        # val_edge_indices, val_edge_features = self._process_edge_features(G, node_to_idx, val_edges)
+        # test_edge_indices, test_edge_features = self._process_edge_features(G, node_to_idx, test_edges)
+
+        # train_data = Data(x=node_features, edge_index=train_edge_indices, edge_attr=train_edge_features)
+        # val_data = Data(x=node_features, edge_index=val_edge_indices, edge_attr=val_edge_features)
+        # test_data = Data(x=node_features, edge_index=test_edge_indices, edge_attr=test_edge_features)
         
         last_train_date = train_edges_with_dates[-1][1]
         last_val_date = val_edges_with_dates[-1][1]
+    
+        train_node_indices, train_node_features = \
+            self._process_node_features(G, last_train_date)
+        val_node_indices, val_node_features = \
+            self._process_node_features(G, last_train_date)
+            # self._process_node_features(G, last_val_date)
+        test_node_indices, test_node_features = \
+            self._process_node_features(G, last_train_date)
+            # self._process_node_features(G, datetime.max)
 
-        if add_edge_attr:
-            node_features, node_to_idx = self._process_node_features(G)
+        assert len(train_node_indices) == len(val_node_indices) == len(test_node_indices)
+        node_to_idx = train_node_indices
+        
+        train_edge_indices = self._process_edge_features(G, node_to_idx, train_edges)
+        val_edge_indices = self._process_edge_features(G, node_to_idx, val_edges)
+        test_edge_indices = self._process_edge_features(G, node_to_idx, test_edges)
 
-            train_edge_indices, train_edge_features = self._process_edge_features(G, node_to_idx, train_edges)
-            val_edge_indices, val_edge_features = self._process_edge_features(G, node_to_idx, val_edges)
-            test_edge_indices, test_edge_features = self._process_edge_features(G, node_to_idx, test_edges)
-
-            train_data = Data(x=node_features, edge_index=train_edge_indices, edge_attr=train_edge_features)
-            val_data = Data(x=node_features, edge_index=val_edge_indices, edge_attr=val_edge_features)
-            test_data = Data(x=node_features, edge_index=test_edge_indices, edge_attr=test_edge_features)
-        else:
-            ...
+        train_data = Data(x=train_node_features, edge_index=train_edge_indices) 
+        val_data = Data(x=val_node_features, edge_index=val_edge_indices)
+        test_data = Data(x=test_node_features, edge_index=test_edge_indices)
 
         return train_data, val_data, test_data
     
@@ -216,3 +240,6 @@ class OpenAlexGraphDataset:
 
     def get_test_data(self):
         return self.test_data
+
+if __name__ == "__main__":
+    dataset_builder = OpenAlexGraphDataset(num_authors=-1, use_cache=False)
