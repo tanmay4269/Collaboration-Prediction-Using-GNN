@@ -1,8 +1,10 @@
 import torch
+from torch import nn
 from torch.nn import Linear
 import torch.nn.functional as F
 
 from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import SAGEConv
 from torch_geometric.utils import add_self_loops
 
 class EdgeSAGEConv(MessagePassing):
@@ -42,16 +44,27 @@ class EdgeSAGEConv(MessagePassing):
         return F.relu(updated_features)
 
 
-class LinkPredictionModel(torch.nn.Module):
-    def __init__(self, in_channels_node, in_channels_edge, hidden_channels, out_channels):
+class LinkPredictionModel(nn.Module):
+    def __init__(self, in_channels, hidden_channels):
         super().__init__()
-        self.conv1 = EdgeSAGEConv(in_channels_node, hidden_channels, in_channels_edge)
-        self.conv2 = EdgeSAGEConv(hidden_channels, out_channels, in_channels_edge)
+        self.conv1 = SAGEConv(in_channels, hidden_channels)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+    
+    # def __init__(self, in_channels_node, in_channels_edge, hidden_channels, out_channels):
+    #     super().__init__()
+    #     self.conv1 = EdgeSAGEConv(in_channels_node, hidden_channels, in_channels_edge)
+    #     self.conv2 = EdgeSAGEConv(hidden_channels, out_channels, in_channels_edge)
 
-    def forward(self, x, edge_index, edge_attr):
-        x = self.conv1(x, edge_index, edge_attr)
-        x = self.conv2(x, edge_index, edge_attr)
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        # x = nn.ReLU(x)
+        x = self.conv2(x, edge_index)
         return x
+    
+    # def forward(self, x, edge_index, edge_attr):
+    #     x = self.conv1(x, edge_index, edge_attr)
+    #     x = self.conv2(x, edge_index, edge_attr)
+    #     return x
 
     def decode(self, z, edge_indices):
         source_node_embeddings = z[edge_indices[0]] 

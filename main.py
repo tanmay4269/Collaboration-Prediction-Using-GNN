@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch_geometric.utils import negative_sampling
 
@@ -16,7 +18,8 @@ LOG_EVERY = 10  # Epochs
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=True)
+dataset_builder = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
+os._exit()
 
 train_graph_data = dataset_builder.get_train_data()
 val_graph_data = dataset_builder.get_val_data()
@@ -44,7 +47,8 @@ def custom_negative_sampling(num_neg_samples):
 def train(data, model, optimizer):
     model.train()
     optimizer.zero_grad()
-    z = model(data.x, data.edge_index, data.edge_attr)
+    z = model(data.x, data.edge_index)
+    # z = model(data.x, data.edge_index, data.edge_attr)
     
     pos_score = model.decode(z, data.edge_index)
 
@@ -62,7 +66,8 @@ def train(data, model, optimizer):
 @torch.no_grad()
 def evaluate(data, model):
     model.eval()
-    z = model(data.x, data.edge_index, data.edge_attr)
+    z = model(data.x, data.edge_index)
+    # z = model(data.x, data.edge_index, data.edge_attr)
 
     pos_pred = model.decode(z, data.edge_index)
     
@@ -75,11 +80,12 @@ def evaluate(data, model):
     return roc_auc_score(y_true, y_pred)
 
 NODE_FEAT_DIM = train_graph_data.x.size(-1)
-EDGE_FEAT_DIM = train_graph_data.edge_attr.size(-1)
-HIDDEN_CHANNELS = 32    
-OUT_CHANNELS = 8
+# EDGE_FEAT_DIM = train_graph_data.edge_attr.size(-1)
+HIDDEN_CHANNELS = 64
+# OUT_CHANNELS = 64
 
-model = LinkPredictionModel(NODE_FEAT_DIM, EDGE_FEAT_DIM, HIDDEN_CHANNELS, OUT_CHANNELS).to(device)
+# model = LinkPredictionModel(NODE_FEAT_DIM, EDGE_FEAT_DIM, HIDDEN_CHANNELS, OUT_CHANNELS).to(device)
+model = LinkPredictionModel(NODE_FEAT_DIM, HIDDEN_CHANNELS).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=BASE_LR)
 scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=END_LR_FACTOR, total_iters=NUM_EPOCHS)
 

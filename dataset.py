@@ -131,8 +131,15 @@ class OpenAlexGraphDataset:
         all_title_embeddings = []
         for work_data in filtered_author_titles:
             n = len(work_data)
-            all_title_embeddings.append(title_embeddings[i:i+n].mean(dim=0))  # ! check dim
-            i += n
+            if n > 0:
+                avg_embedding = title_embeddings[i:i+n].mean(dim=0)
+                i += n
+            else:
+                # raise ValueError
+                print('.', end='')
+                avg_embedding = torch.zeros_like(title_embeddings[0])
+            
+            all_title_embeddings.append(avg_embedding)
 
         assert len(all_title_embeddings) == len(G.nodes()), "Title embeddings' messed up"
         
