@@ -90,18 +90,20 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     
     return roc_auc_score(labels, scores)
 
-def runner():
+def runner(base_lr=0.001, hidden_channels=32, num_layers=2, 
+          dropout=0.5, out_channels=32, **kwargs):
+    """Runner function with hyperparameters as arguments"""
     seed_everything(42)
     
     CONFIG = {
-        'base_lr': 0.001,
-        'hidden_channels': 32,
-        'num_layers': 2,
-        'dropout': 0.5,
+        'base_lr': base_lr,
+        'hidden_channels': hidden_channels,
+        'num_layers': num_layers,
+        'dropout': dropout,
+        'out_channels': out_channels,
 
-        'out_channels': 32,
         'weight_decay': 1e-4,
-        'num_epochs': 100,
+        'num_epochs': 250,
         'log_every': 5,  # Epochs between logging
         'patience': 5,  # val_auc checked every time logging
     }
@@ -223,26 +225,90 @@ def runner():
     }
 
 def main():
-    N_RUNS = 10
-    results = {
-        'untrained_val': [],
-        'untrained_test': [],
+    # Define parameter grid
+    # param_grid = {
+    #     'base_lr': [0.0001, 0.001, 0.01],
+    #     'hidden_channels': [32, 64, 128],
+    #     'num_layers': [2, 3],
+    #     'dropout': [0.3, 0.5],
+    #     'out_channels': [16, 32]
+    # }
+    param_grid = {
+        'base_lr': [0.001],
+        'hidden_channels': [32],
+        'num_layers': [1, 2, 3],
+        'dropout': [0.25, 0.5, 0.75],
+        'out_channels': [16]
+    }
+    
+    # Generate all combinations
+    from itertools import product
+    param_names = list(param_grid.keys())
+    param_values = list(param_grid.values())
+    
+    best_val_auc = 0
+    best_config = None
+    best_test_auc = 0
+    
+    total_configs = np.prod([len(v) for v in param_values])
+    print(f"Starting grid search with {total_configs} configurations")
+    
+    # Run grid search
+    for i, values in enumerate(product(*param_values), 1):
+        current_config = dict(zip(param_names, values))
+        print(f"\nConfig {i}/{total_configs}:")
+        print(current_config)
+        
+        # Run experiment with current config
+        results = []
+        N_RUNS = 3  # Number of runs per config
+        
+        for run in range(N_RUNS):
+            run_results = runner(**current_config)  # Pass config to runner
+            results.append(run_results['final_val'])
+        
+        # Get mean validation AUC
+        mean_val_auc = np.mean(results)
+        std_val_auc = np.std(results)
+        print(f"Mean Val AUC: {mean_val_auc:.4f} ± {std_val_auc:.4f}")
+        
+        # Update best if needed
+        if mean_val_auc > best_val_auc:
+            best_val_auc = mean_val_auc
+            best_config = current_config.copy()
+            
+    # Final evaluation with best config
+    print("\nBest configuration found:")
+    print(best_config)
+    print(f"Best validation AUC: {best_val_auc:.4f}")
+    
+    # Run final evaluation with best config
+    print("\nFinal evaluation with best config:")
+    final_results = {
         'final_val': [],
         'final_test': []
     }
     
-    for run in range(N_RUNS):
-        print(f"\nRun {run + 1}/{N_RUNS}")
-        run_results = runner()
-        for metric in results:
-            results[metric].append(run_results[metric])
+    N_FINAL_RUNS = 5
+    for run in range(N_FINAL_RUNS):
+        run_results = runner(**best_config)
+        for metric in final_results:
+            final_results[metric].append(run_results[metric])
     
-    print("\nFinal Statistics over", N_RUNS, "runs:")
-    for metric in results:
-        values = np.array(results[metric])
+    # Print final statistics
+    print(f"\nFinal Statistics over {N_FINAL_RUNS} runs with best config:")
+    for metric in final_results:
+        values = np.array(final_results[metric])
         mean = np.mean(values)
         std = np.std(values)
         print(f"{metric}: {mean:.4f} ± {std:.4f}")
+
+    # Print best config in a more readable format
+    print("\nBest configuration details:")
+    print("-" * 30)
+    for param, value in best_config.items():
+        print(f"{param:15s}: {value}")
+    print("-" * 30)
 
 if __name__ == "__main__":
     main()
