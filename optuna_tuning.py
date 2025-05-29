@@ -1,6 +1,7 @@
 import optuna
 import numpy as np
 from main import runner
+from dataset import OpenAlexGraphDataset
 
 def main():
     # Define the objective function for Optuna
@@ -65,13 +66,15 @@ def main():
         'untrained_val': [],
         'untrained_test': []
     }
+
+    dataset_builder = OpenAlexGraphDataset()
     
     N_FINAL_RUNS = 5 # Number of times to run the best config for final stats
     print(f"Performing {N_FINAL_RUNS} final runs with best config...")
     for i in range(N_FINAL_RUNS):
         print(f"Final run {i+1}/{N_FINAL_RUNS}...")
         # runner will use its internal seed_everything(42) for each of these runs
-        run_output = runner(**best_config)
+        run_output = runner(dataset_builder, **best_config)
         for metric_key in final_results_metrics.keys():
             final_results_metrics[metric_key].append(run_output[metric_key])
     

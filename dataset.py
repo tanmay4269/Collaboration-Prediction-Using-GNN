@@ -11,7 +11,7 @@ from torch_geometric.data import Data
 from sentence_transformers import SentenceTransformer
 
 class OpenAlexGraphDataset:
-    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=200, cache_dir="cache", use_cache=True):
+    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=-1, cache_dir="cache", use_cache=True):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
 

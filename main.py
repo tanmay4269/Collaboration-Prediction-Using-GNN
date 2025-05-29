@@ -89,7 +89,7 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     
     return roc_auc_score(labels, scores)
 
-def runner(base_lr=0.001, hidden_channels=32, num_layers=2, 
+def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2, 
           dropout=0.5, out_channels=32, print_info=False, **kwargs):
     """Runner function with hyperparameters as arguments"""
     seed_everything(42)
@@ -108,11 +108,6 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
     }
     
     # Load dataset
-    dataset_builder = OpenAlexGraphDataset(
-        json_path="data/openalex_cs_papers.json",
-        num_authors=-1,
-        use_cache=True
-    )
     train_graph_data = dataset_builder.get_train_data()
     val_graph_data = dataset_builder.get_val_data()
     test_graph_data = dataset_builder.get_test_data()
@@ -229,7 +224,7 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
     }
 
 def main():
-    N_RUNS = 10
+    N_RUNS = 2
     results = {
         'untrained_val': [],
         'untrained_test': [],
@@ -237,9 +232,12 @@ def main():
         'final_test': []
     }
     
+    dataset_builder = OpenAlexGraphDataset()
+    
     for run in range(N_RUNS):
         print(f"Run {run + 1}/{N_RUNS}")
         run_results = runner(
+            dataset_builder=dataset_builder,
             base_lr=0.0036, 
             hidden_channels=256, 
             num_layers=1, 
@@ -250,12 +248,14 @@ def main():
         for metric in results:
             results[metric].append(run_results[metric])
     
-    print("\nFinal Statistics over", N_RUNS, "runs:")
-    for metric in results:
-        values = np.array(results[metric])
-        mean = np.mean(values)
-        std = np.std(values)
-        print(f"{metric}: {mean:.4f} ± {std:.4f}")
+    print(f"\nFinal Statistics over {N_RUNS} runs with the best config:")
+    print("-" * 20)
+    for metric, values_list in results.items():
+        values_np = np.array(values_list)
+        mean_val = np.mean(values_np)
+        std_val = np.std(values_np)
+        print(f"{metric:15s}: {mean_val:.4f} ± {std_val:.4f}")
+    print("-" * 20)
 
 if __name__ == "__main__":
     main()
