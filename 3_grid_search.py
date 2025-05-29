@@ -1,7 +1,14 @@
-import numpy as np
+import os
+import itertools
+from datetime import datetime
+timestamp = datetime.now().strftime('%d-%H-%M-%S')
+
 import torch
 from torch_geometric.utils import negative_sampling
+
+import numpy as np
 from sklearn.metrics import roc_auc_score
+
 from model import LinkPredictionModel
 from dataset import OpenAlexGraphDataset
 
@@ -86,27 +93,17 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     
     return roc_auc_score(labels, scores)
 
-def main():
-    # Configuration
-    CONFIG = {
-        'base_lr': 0.001,
-        'weight_decay': 1e-4,
-        'num_epochs': 100,
-        'log_every': 5,
-        'patience': 15,
-        'hidden_channels': 64,
-        'out_channels': 32
-    }
+def trainer(config: dict, dataset_builder, save_dir: str) -> float:
+    """Train a model with given configuration and return best validation AUC.
     
-    # Set random seed
-    seed_everything()
+    Args:
+        config: Dictionary containing model and training parameters
+        dataset_builder: Dataset object containing train/val/test splits
+        save_dir: Directory to save model weights
     
-    # Load dataset
-    dataset_builder = OpenAlexGraphDataset(
-        json_path="data/openalex_cs_papers.json",
-        num_authors=-1,
-        use_cache=True
-    )
+    Returns:
+        float: Best validation AUC achieved
+    """
     train_graph_data = dataset_builder.get_train_data()
     val_graph_data = dataset_builder.get_val_data()
     test_graph_data = dataset_builder.get_test_data()
@@ -133,22 +130,21 @@ def main():
     model = LinkPredictionModel(
         node_feat_dim, 
         edge_feat_dim,
-        CONFIG['hidden_channels'],
-        CONFIG['out_channels']
+        config['hidden_channels'],
+        config['out_channels']
     ).cuda()
     
-    # Setup training
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=CONFIG['base_lr'],
-        weight_decay=CONFIG['weight_decay']
+        lr=config['base_lr'],
+        weight_decay=config['weight_decay']
     )
+    
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=10, verbose=True
     )
     
-    # Print initial info
-    print("Starting training...")
+    print(f"\nTraining with config: {config}")
     print(f"Train edges: {train_graph_data.edge_index.size(1)}")
     print(f"Val edges: {val_graph_data.edge_index.size(1)}")
     print(f"Test edges: {test_graph_data.edge_index.size(1)}")
@@ -168,39 +164,106 @@ def main():
     best_val_auc = 0
     patience_counter = 0
     
-    for epoch in range(CONFIG['num_epochs']):
+    for epoch in range(config['num_epochs']):
         loss = train(train_graph_data, model, optimizer)
         
-        if epoch % CONFIG['log_every'] == 0:
+        if epoch % config['log_every'] == 0:
             val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                              train_graph_data.edge_attr, val_graph_data.edge_index,
                              val_neg_edge_index)
             
             print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | '
-                  f'LR: {optimizer.param_groups[0]["lr"]:.6f}')
+                  f'LR: {scheduler.get_last_lr()[0]:.6f}')
             
             scheduler.step(val_auc)
             
             if val_auc > best_val_auc:
                 best_val_auc = val_auc
                 patience_counter = 0
-                torch.save(model.state_dict(), 'best_model.pt')
+                
+                # Save model with timestamp and AUC
+                save_path = os.path.join(save_dir, f"{timestamp}.pth")
+                torch.save(model.state_dict(), save_path)
             else:
                 patience_counter += 1
             
-            if patience_counter >= CONFIG['patience']:
+            if patience_counter >= config['patience']:
                 print(f"Early stopping at epoch {epoch}")
                 break
-    
-    # Final evaluation
-    model.load_state_dict(torch.load('best_model.pt'))
-    print(f"\nBest validation AUC: {best_val_auc:.4f}")
-    
+
     print("Testing...")
     test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
     print(f"Test AUC: {test_auc:.4f}")
+    
+    return best_val_auc
+
+def main():
+    # Grid search parameters
+    grid_params = {
+        'base_lr': [0.001],
+        'hidden_channels': [32],
+        'out_channels': [32]
+    }
+    # grid_params = {
+    #     'base_lr': [0.0001, 0.0005, 0.001, 0.005, 0.01],
+    #     'hidden_channels': [16, 32, 64],
+    #     'out_channels': [16, 32, 64]
+    # }
+    
+    # Fixed parameters
+    fixed_params = {
+        'weight_decay': 1e-4,
+        'num_epochs': 100,
+        'log_every': 5,
+        'patience': 15
+    }
+    
+    # Create directory for saved weights
+    save_dir = "saved_weights"
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Set random seed
+    seed_everything()
+    
+    # Load dataset
+    dataset_builder = OpenAlexGraphDataset(
+        json_path="data/openalex_cs_papers.json",
+        num_authors=-1,
+        use_cache=True
+    )
+    
+    # Generate all possible combinations of parameters
+    param_names = list(grid_params.keys())
+    param_values = list(grid_params.values())
+    
+    best_config = None
+    best_val_auc = 0
+    
+    # Perform grid search
+    for params in itertools.product(*param_values):
+        # Create config for this run
+        current_config = dict(zip(param_names, params))
+        current_config.update(fixed_params)  # Add fixed parameters
+        
+        # Train model with current config
+        val_aucs = []
+        for train_idx in range(10):
+            print("*** Training run", train_idx + 1, "***")
+            val_aucs.append(trainer(current_config, dataset_builder, save_dir))
+        
+        print(f"*** Val AUC: {np.mean(val_aucs):.4f} ± {np.std(val_aucs):.4f} ***")
+        # Update best config if necessary
+        if np.mean(val_aucs) > best_val_auc:
+            best_val_auc = np.mean(val_aucs)
+            best_config = current_config.copy()
+    
+    print("\nGrid Search Results:")
+    print(f"Best validation AUC: {best_val_auc:.4f}")
+    print("Best configuration:")
+    for key, value in best_config.items():
+        print(f"{key}: {value}")
 
 if __name__ == "__main__":
     main()
