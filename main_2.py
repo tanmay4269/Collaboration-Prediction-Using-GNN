@@ -83,17 +83,30 @@ def train(data, model, optimizer):
     return loss.item()
 
 @torch.no_grad()
-def evaluate(data, model, neg_edge_index):
+def evaluate(model,             # The GNN model
+             node_features_all, # All node features (e.g., train_data.x)
+             train_edge_idx,    # Training edge indices (e.g., train_data.edge_index)
+             train_edge_attr,   # Training edge attributes (e.g., train_data.edge_attr)
+             eval_pos_edge_idx, # Positive edges for evaluation (e.g., val_data.edge_index)
+             eval_neg_edge_idx  # Negative edges for evaluation (e.g., precomputed val_neg_edge_index)
+            ):
     model.eval()
-    z = model(data.x, data.edge_index, data.edge_attr)
-    
-    pos_pred = model.decode(z, data.edge_index)
-    neg_pred = model.decode(z, neg_edge_index)
-    
-    y_pred = torch.cat([pos_pred, neg_pred]).cpu()
-    y_true = torch.cat([torch.ones(pos_pred.size(0)), torch.zeros(neg_pred.size(0))]).cpu()
-    
-    return roc_auc_score(y_true, y_pred)
+    # Compute node embeddings (z) using the training graph structure
+    z = model(node_features_all, train_edge_idx, train_edge_attr)
+
+    # Decode scores for positive evaluation edges
+    pos_scores = model.decode(z, eval_pos_edge_idx)
+    # Decode scores for negative evaluation edges
+    neg_scores = model.decode(z, eval_neg_edge_idx)
+
+    # Concatenate scores and create true labels
+    scores = torch.cat([pos_scores, neg_scores]).cpu()
+    labels = torch.cat([
+        torch.ones(pos_scores.size(0)),
+        torch.zeros(neg_scores.size(0))
+    ]).cpu()
+
+    return roc_auc_score(labels, scores)
 
 # Model initialization
 NODE_FEAT_DIM = train_graph_data.x.size(-1)
@@ -122,17 +135,23 @@ print(f"Test edges: {test_graph_data.edge_index.size(1)}")
 print(f"Nodes: {train_graph_data.num_nodes}")
 
 
-val_auc = evaluate(val_graph_data, model, val_neg_edge_index)
+# Untrained Val AUC
+val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index, train_graph_data.edge_attr,
+                   val_graph_data.edge_index, val_neg_edge_index)
 print(f"Untrained Val AUC: {val_auc:.4f}")
 
-test_auc = evaluate(test_graph_data, model, test_neg_edge_index)
+# Untrained Test AUC
+test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index, train_graph_data.edge_attr,
+                    test_graph_data.edge_index, test_neg_edge_index)
 print(f"Untrained Test AUC: {test_auc:.4f}")
 
 for epoch in range(NUM_EPOCHS):
     loss = train(train_graph_data, model, optimizer)
     
     if epoch % LOG_EVERY == 0:
-        val_auc = evaluate(val_graph_data, model, val_neg_edge_index)
+        # Evaluate on validation set using training graph structure for embeddings
+        val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index, train_graph_data.edge_attr,
+                           val_graph_data.edge_index, val_neg_edge_index)
         
         print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
@@ -158,5 +177,7 @@ model.load_state_dict(torch.load('best_model.pt'))
 print(f"\nBest validation AUC: {best_val_auc:.4f}")
 
 print("Testing...")
-test_auc = evaluate(test_graph_data, model, test_neg_edge_index)
+# Evaluate on test set using training graph structure for embeddings
+test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index, train_graph_data.edge_attr,
+                    test_graph_data.edge_index, test_neg_edge_index)
 print(f"Test AUC: {test_auc:.4f}")
