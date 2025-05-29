@@ -92,8 +92,6 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
 def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2, 
           dropout=0.5, out_channels=32, print_info=False, **kwargs):
     """Runner function with hyperparameters as arguments"""
-    seed_everything(42)
-    
     CONFIG = {
         'base_lr': base_lr,
         'hidden_channels': hidden_channels,
@@ -223,8 +221,8 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
         'final_test': best_test_auc
     }
 
-def main():
-    N_RUNS = 2
+def main(dataset_builder=None):
+    N_RUNS = 10
     results = {
         'untrained_val': [],
         'untrained_test': [],
@@ -232,9 +230,12 @@ def main():
         'final_test': []
     }
     
-    dataset_builder = OpenAlexGraphDataset()
+    if dataset_builder is None:
+        dataset_builder = OpenAlexGraphDataset()
     
     for run in range(N_RUNS):
+        seed_everything(run)
+        
         print(f"Run {run + 1}/{N_RUNS}")
         run_results = runner(
             dataset_builder=dataset_builder,

@@ -11,9 +11,22 @@ from torch_geometric.data import Data
 from sentence_transformers import SentenceTransformer
 
 class OpenAlexGraphDataset:
-    def __init__(self, json_path="data/openalex_cs_papers.json", num_authors=-1, cache_dir="cache", use_cache=True):
+    def __init__(
+        self, 
+        json_path="data/openalex_cs_papers.json", 
+        num_authors=-1,
+        cache_dir="cache",
+        use_cache=True,
+        use_citation_count=True,
+        use_work_count=True,
+        use_institution_embedding=True
+    ):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
+        
+        self.use_citation_count = use_citation_count
+        self.use_work_count = use_work_count
+        self.use_institution_embedding = use_institution_embedding
 
         self.train_cache_path = os.path.join(self.cache_dir, "train_data.pt")
         self.val_cache_path = os.path.join(self.cache_dir, "val_data.pt")
@@ -32,6 +45,7 @@ class OpenAlexGraphDataset:
         else:
             print("Loading sentence model...")
             self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+
             print("Done!")
 
             print("Building datasets...")
@@ -104,14 +118,22 @@ class OpenAlexGraphDataset:
         
     def _process_node_features(self, G):
         max_citations = np.max([G.nodes[node_id]['citation_count'] for node_id in G.nodes()])
+        max_work_count = np.max([G.nodes[node_id]['work_count'] for node_id in G.nodes()])
         institution_names = [G.nodes[node_id]['affiliated_institution'] for node_id in G.nodes()]
         institution_embeddings = self.sentence_model.encode(institution_names, convert_to_tensor=True).to('cuda')
 
         node_features_list = []
         for i, node_id in enumerate(G.nodes()):
             node = G.nodes[node_id]
-            scaled_citation_count = torch.tensor([node["citation_count"] / max_citations], dtype=torch.float).to('cuda')
-            feat = torch.cat((scaled_citation_count, institution_embeddings[i]))
+            feat = []
+            if self.use_citation_count:
+                feat.append(torch.tensor([node["citation_count"] / max_citations], dtype=torch.float).cuda())
+            if self.use_work_count:
+                feat.append(torch.tensor([node["work_count"] / max_work_count], dtype=torch.float).cuda()) 
+            if self.use_institution_embedding:
+                feat.append(institution_embeddings[i])
+
+            feat = torch.cat(feat) if feat else torch.zeros(1).cuda()
             node_features_list.append(feat)
 
         node_features = torch.stack(node_features_list)
