@@ -2,7 +2,7 @@ import torch
 from torch_geometric.utils import negative_sampling
 
 import numpy as np
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, average_precision_score
 
 from model import LinkPredictionModel
 from dataset import OpenAlexGraphDataset
@@ -61,8 +61,8 @@ def train(data, model, optimizer) -> float:
 
 @torch.no_grad()
 def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
-            eval_pos_edge_idx, eval_neg_edge_idx) -> float:
-    """Evaluate the model using ROC AUC score.
+            eval_pos_edge_idx, eval_neg_edge_idx) -> dict:
+    """Evaluate the model using multiple metrics.
     
     Args:
         model: The GNN model
@@ -73,7 +73,7 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
         eval_neg_edge_idx: Negative edges for evaluation
     
     Returns:
-        float: ROC AUC score
+        dict: Dictionary containing ROC AUC and PR AUC scores
     """
     model.eval()
     z = model(node_features_all, train_edge_idx, train_edge_attr)
@@ -87,7 +87,16 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
         torch.zeros(neg_scores.size(0))
     ]).cpu()
     
-    return roc_auc_score(labels, scores)
+    # Calculate AUC-ROC
+    roc_auc = roc_auc_score(labels, scores)
+    
+    # Calculate AUC-PR
+    pr_auc = average_precision_score(labels, scores)
+    
+    return {
+        'roc_auc': roc_auc,
+        'pr_auc': pr_auc
+    }
 
 def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2, 
           dropout=0.5, out_channels=32, print_info=False, **kwargs):
@@ -120,7 +129,6 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     
     test_neg_edge_index = negative_sampling(
         edge_index=torch.cat([train_graph_data.edge_index, val_graph_data.edge_index], dim=1),
-        # edge_index=train_graph_data.edge_index,
         num_nodes=train_graph_data.num_nodes,
         num_neg_samples=test_graph_data.edge_index.size(1),
         method='sparse'
@@ -158,39 +166,43 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
         print(f"Nodes: {train_graph_data.num_nodes}")
     
     # Evaluate untrained model
-    untrained_val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    untrained_val_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                       train_graph_data.edge_attr, val_graph_data.edge_index,
                       val_neg_edge_index)
-    untrained_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    untrained_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
     if print_info:
-        print(f"Untrained Val AUC: {untrained_val_auc:.4f}")
-        print(f"Untrained Test AUC: {untrained_test_auc:.4f}")
+        print(f"Untrained Metrics:")
+        print(f"  Val  - ROC-AUC: {untrained_val_metrics['roc_auc']:.4f}, PR-AUC: {untrained_val_metrics['pr_auc']:.4f}")
+        print(f"  Test - ROC-AUC: {untrained_test_metrics['roc_auc']:.4f}, PR-AUC: {untrained_test_metrics['pr_auc']:.4f}")
     
     # Training loop
     best_val_auc = 0
     patience_counter = 0
-    best_model_state = None  # Store best model state in memory
+    best_model_state = None
+    best_metrics = None
     
     for epoch in range(CONFIG['num_epochs']):
         loss = train(train_graph_data, model, optimizer)
         
         if epoch % CONFIG['log_every'] == 0:
-            val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+            val_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                              train_graph_data.edge_attr, val_graph_data.edge_index,
                              val_neg_edge_index)
             
             if print_info:
-                print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | '
+                print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | '
+                      f'Val ROC-AUC: {val_metrics["roc_auc"] :.4f}, '
+                      f'PR-AUC: {val_metrics["pr_auc"] :.4f} | '
                       f'LR: {scheduler.get_last_lr()[0]:.6f}')
             
-            scheduler.step(val_auc)
+            scheduler.step(val_metrics['roc_auc'])
             
-            if val_auc > best_val_auc:
-                best_val_auc = val_auc
+            if val_metrics['roc_auc'] > best_val_auc:
+                best_val_auc = val_metrics['roc_auc']
+                best_metrics = val_metrics
                 patience_counter = 0
-                # Store model state in memory instead of disk
                 best_model_state = {
                     k: v.cpu().clone() for k, v in model.state_dict().items()
                 }
@@ -205,30 +217,34 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     # Load best model state from memory
     model.load_state_dict(best_model_state)
     if print_info:
-        print(f"\nBest validation AUC: {best_val_auc:.4f}")
+        print(f"\nBest validation metrics:")
+        print(f"  ROC-AUC: {best_metrics['roc_auc']:.4f}")
+        print(f"  PR-AUC:  {best_metrics['pr_auc']:.4f}")
     
-    best_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    final_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
     if print_info:
-        print(f"Test AUC: {best_test_auc:.4f}")
+        print(f"\nTest metrics:")
+        print(f"  ROC-AUC: {final_test_metrics['roc_auc']:.4f}")
+        print(f"  PR-AUC:  {final_test_metrics['pr_auc']:.4f}")
     
-    # Return the metrics we want to track
+    # Return all metrics
     return {
-        'untrained_val': untrained_val_auc,
-        'untrained_test': untrained_test_auc,
-        'final_val': best_val_auc,
-        'final_test': best_test_auc
+        'untrained_val': untrained_val_metrics,
+        'untrained_test': untrained_test_metrics,
+        'final_val': best_metrics,
+        'final_test': final_test_metrics
     }
 
-def main(dataset_builder=None):
-    N_RUNS = 10
+def main(dataset_builder=None, N_RUNS=10):
+    metrics = ['roc_auc', 'pr_auc']
     results = {
-        'untrained_val': [],
-        'untrained_test': [],
-        'final_val': [],
-        'final_test': []
+        f'untrained_val_{m}': [] for m in metrics
     }
+    results.update({f'untrained_test_{m}': [] for m in metrics})
+    results.update({f'final_val_{m}': [] for m in metrics})
+    results.update({f'final_test_{m}': [] for m in metrics})
     
     if dataset_builder is None:
         dataset_builder = OpenAlexGraphDataset()
@@ -246,17 +262,23 @@ def main(dataset_builder=None):
             out_channels=128,
             print_info=False
         )
-        for metric in results:
-            results[metric].append(run_results[metric])
+        
+        # Collect all metrics
+        for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_test']:
+            for metric in metrics:
+                results[f'{phase}_{metric}'].append(run_results[phase][metric])
     
     print(f"\nFinal Statistics over {N_RUNS} runs with the best config:")
-    print("-" * 20)
-    for metric, values_list in results.items():
-        values_np = np.array(values_list)
-        mean_val = np.mean(values_np)
-        std_val = np.std(values_np)
-        print(f"{metric:15s}: {mean_val:.4f} ± {std_val:.4f}")
-    print("-" * 20)
+    print("-" * 50)
+    for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_test']:
+        print(f"\n{phase.replace('_', ' ').title()}:")
+        for metric in metrics:
+            key = f'{phase}_{metric}'
+            values = np.array(results[key])
+            mean_val = np.mean(values)
+            std_val = np.std(values)
+            print(f"  {metric:8s}: {mean_val:.4f} ± {std_val:.4f}")
+    print("-" * 50)
 
 if __name__ == "__main__":
     main()
