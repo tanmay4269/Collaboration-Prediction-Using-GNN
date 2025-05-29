@@ -1,11 +1,15 @@
-import numpy as np
+import os
+
 import torch
 from torch_geometric.utils import negative_sampling
+
+import numpy as np
 from sklearn.metrics import roc_auc_score
+
 from model import LinkPredictionModel
 from dataset import OpenAlexGraphDataset
 
-def seed_everything(seed: int = 42) -> None:
+def seed_everything(seed: int) -> None:
     """Set random seeds for reproducibility."""
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -46,8 +50,10 @@ def train(data, model, optimizer) -> float:
     
     # Prepare labels and compute loss
     score = torch.cat([pos_score, neg_score])
-    labels = torch.cat([torch.ones(pos_score.size(0)), 
-                       torch.zeros(neg_score.size(0))]).cuda()
+    labels = torch.cat([
+        torch.ones(pos_score.size(0)), 
+        torch.zeros(neg_score.size(0))
+    ]).cuda()
     loss = torch.nn.functional.binary_cross_entropy_with_logits(score, labels)
     
     loss.backward()
@@ -87,19 +93,17 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     return roc_auc_score(labels, scores)
 
 def main():
-    # Configuration
+    seed_everything(42)
+
     CONFIG = {
         'base_lr': 0.001,
+        'hidden_channels': 32,
+        'out_channels': 32,
         'weight_decay': 1e-4,
         'num_epochs': 100,
         'log_every': 5,
         'patience': 15,
-        'hidden_channels': 32,
-        'out_channels': 32
     }
-    
-    # Set random seed
-    seed_everything()
     
     # Load dataset
     dataset_builder = OpenAlexGraphDataset(
@@ -167,6 +171,7 @@ def main():
     # Training loop
     best_val_auc = 0
     patience_counter = 0
+    best_model_state = None  # Store best model state in memory
     
     for epoch in range(CONFIG['num_epochs']):
         loss = train(train_graph_data, model, optimizer)
@@ -184,7 +189,10 @@ def main():
             if val_auc > best_val_auc:
                 best_val_auc = val_auc
                 patience_counter = 0
-                torch.save(model.state_dict(), 'best_model.pt')
+                # Store model state in memory instead of disk
+                best_model_state = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
             else:
                 patience_counter += 1
             
@@ -192,8 +200,8 @@ def main():
                 print(f"Early stopping at epoch {epoch}")
                 break
     
-    # Final evaluation
-    model.load_state_dict(torch.load('best_model.pt'))
+    # Load best model state from memory
+    model.load_state_dict(best_model_state)
     print(f"\nBest validation AUC: {best_val_auc:.4f}")
     
     print("Testing...")
