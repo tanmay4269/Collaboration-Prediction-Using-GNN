@@ -1,5 +1,3 @@
-import os
-
 import torch
 from torch_geometric.utils import negative_sampling
 
@@ -92,17 +90,20 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     
     return roc_auc_score(labels, scores)
 
-def main():
+def runner():
     seed_everything(42)
-
+    
     CONFIG = {
         'base_lr': 0.001,
         'hidden_channels': 32,
+        'num_layers': 2,
+        'dropout': 0.5,
+
         'out_channels': 32,
         'weight_decay': 1e-4,
         'num_epochs': 100,
-        'log_every': 5,
-        'patience': 15,
+        'log_every': 5,  # Epochs between logging
+        'patience': 5,  # val_auc checked every time logging
     }
     
     # Load dataset
@@ -125,6 +126,7 @@ def main():
     
     test_neg_edge_index = negative_sampling(
         edge_index=torch.cat([train_graph_data.edge_index, val_graph_data.edge_index], dim=1),
+        # edge_index=train_graph_data.edge_index,
         num_nodes=train_graph_data.num_nodes,
         num_neg_samples=test_graph_data.edge_index.size(1),
         method='sparse'
@@ -138,6 +140,8 @@ def main():
         node_feat_dim, 
         edge_feat_dim,
         CONFIG['hidden_channels'],
+        CONFIG['num_layers'],
+        CONFIG['dropout'],
         CONFIG['out_channels']
     ).cuda()
     
@@ -148,7 +152,7 @@ def main():
         weight_decay=CONFIG['weight_decay']
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=10, verbose=True
+        optimizer, mode='max', factor=0.5, patience=10
     )
     
     # Print initial info
@@ -159,14 +163,14 @@ def main():
     print(f"Nodes: {train_graph_data.num_nodes}")
     
     # Evaluate untrained model
-    val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    untrained_val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                       train_graph_data.edge_attr, val_graph_data.edge_index,
                       val_neg_edge_index)
-    test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    untrained_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
-    print(f"Untrained Val AUC: {val_auc:.4f}")
-    print(f"Untrained Test AUC: {test_auc:.4f}")
+    print(f"Untrained Val AUC: {untrained_val_auc:.4f}")
+    print(f"Untrained Test AUC: {untrained_test_auc:.4f}")
     
     # Training loop
     best_val_auc = 0
@@ -205,10 +209,40 @@ def main():
     print(f"\nBest validation AUC: {best_val_auc:.4f}")
     
     print("Testing...")
-    test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+    best_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
-    print(f"Test AUC: {test_auc:.4f}")
+    print(f"Test AUC: {best_test_auc:.4f}")
+    
+    # Return the metrics we want to track
+    return {
+        'untrained_val': untrained_val_auc,
+        'untrained_test': untrained_test_auc,
+        'final_val': best_val_auc,
+        'final_test': best_test_auc
+    }
+
+def main():
+    N_RUNS = 10
+    results = {
+        'untrained_val': [],
+        'untrained_test': [],
+        'final_val': [],
+        'final_test': []
+    }
+    
+    for run in range(N_RUNS):
+        print(f"\nRun {run + 1}/{N_RUNS}")
+        run_results = runner()
+        for metric in results:
+            results[metric].append(run_results[metric])
+    
+    print("\nFinal Statistics over", N_RUNS, "runs:")
+    for metric in results:
+        values = np.array(results[metric])
+        mean = np.mean(values)
+        std = np.std(values)
+        print(f"{metric}: {mean:.4f} ± {std:.4f}")
 
 if __name__ == "__main__":
     main()

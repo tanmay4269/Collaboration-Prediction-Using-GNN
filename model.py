@@ -23,32 +23,43 @@ class EdgeSAGEConv(MessagePassing):
 
 
 class LinkPredictionModel(torch.nn.Module):
-    def __init__(self, in_channels_node, in_channels_edge, hidden_channels, out_channels):
+    def __init__(self, in_channels_node, in_channels_edge, hidden_channels, num_layers, dropout, out_channels):
         super().__init__()
-        self.conv1 = EdgeSAGEConv(in_channels_node, hidden_channels, in_channels_edge)
-        self.conv2 = EdgeSAGEConv(hidden_channels, out_channels, in_channels_edge)
-        self.dropout = nn.Dropout(0.2)
         
-        self.bn1 = nn.BatchNorm1d(hidden_channels)
-        self.bn2 = nn.BatchNorm1d(out_channels)
+        # Build the layers list
+        layers = []
+        
+        # First layer (input to hidden)
+        layers.append(EdgeSAGEConv(in_channels_node, hidden_channels, in_channels_edge))
+        layers.append(nn.BatchNorm1d(hidden_channels))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        
+        # Hidden layers
+        for _ in range(num_layers - 2):
+            layers.append(EdgeSAGEConv(hidden_channels, hidden_channels, in_channels_edge))
+            layers.append(nn.BatchNorm1d(hidden_channels))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+        
+        # Final layer (hidden to output)
+        layers.append(EdgeSAGEConv(hidden_channels, out_channels, in_channels_edge))
+        layers.append(nn.BatchNorm1d(out_channels))
+        
+        # Create sequential model
+        self.layers = nn.ModuleList(layers)
 
     def forward(self, x, edge_index, edge_attr):
-        # First layer 
-        x = self.conv1(x, edge_index, edge_attr)
-        x = self.bn1(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-        
-        # Second layer 
-        x = self.conv2(x, edge_index, edge_attr)
-        x = self.bn2(x)
-        x = F.relu(x)
-        
+        """Forward pass through all layers."""
+        for layer in self.layers:
+            if isinstance(layer, EdgeSAGEConv):
+                x = layer(x, edge_index, edge_attr)
+            else:
+                x = layer(x)
         return x
 
     def decode(self, z, edge_indices):
-        source_node_embeddings = z[edge_indices[0]] 
-        target_node_embeddings = z[edge_indices[1]] 
-        
-        scores = (source_node_embeddings * target_node_embeddings).sum(dim=-1)
-        return scores
+        """Compute link predictions from node embeddings."""
+        source_node_embeddings = z[edge_indices[0]]
+        target_node_embeddings = z[edge_indices[1]]
+        return (source_node_embeddings * target_node_embeddings).sum(dim=-1)
