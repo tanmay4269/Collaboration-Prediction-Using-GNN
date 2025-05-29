@@ -18,7 +18,6 @@ def seed_everything(seed: int) -> None:
     
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    print(f"Seed set to {seed}")
 
 def train(data, model, optimizer) -> float:
     """Train the model for one epoch.
@@ -91,7 +90,7 @@ def evaluate(model, node_features_all, train_edge_idx, train_edge_attr,
     return roc_auc_score(labels, scores)
 
 def runner(base_lr=0.001, hidden_channels=32, num_layers=2, 
-          dropout=0.5, out_channels=32, **kwargs):
+          dropout=0.5, out_channels=32, print_info=False, **kwargs):
     """Runner function with hyperparameters as arguments"""
     seed_everything(42)
     
@@ -158,11 +157,12 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
     )
     
     # Print initial info
-    print("Starting training...")
-    print(f"Train edges: {train_graph_data.edge_index.size(1)}")
-    print(f"Val edges: {val_graph_data.edge_index.size(1)}")
-    print(f"Test edges: {test_graph_data.edge_index.size(1)}")
-    print(f"Nodes: {train_graph_data.num_nodes}")
+    if print_info:
+        print("Starting training...")
+        print(f"Train edges: {train_graph_data.edge_index.size(1)}")
+        print(f"Val edges: {val_graph_data.edge_index.size(1)}")
+        print(f"Test edges: {test_graph_data.edge_index.size(1)}")
+        print(f"Nodes: {train_graph_data.num_nodes}")
     
     # Evaluate untrained model
     untrained_val_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
@@ -171,8 +171,9 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
     untrained_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
-    print(f"Untrained Val AUC: {untrained_val_auc:.4f}")
-    print(f"Untrained Test AUC: {untrained_test_auc:.4f}")
+    if print_info:
+        print(f"Untrained Val AUC: {untrained_val_auc:.4f}")
+        print(f"Untrained Test AUC: {untrained_test_auc:.4f}")
     
     # Training loop
     best_val_auc = 0
@@ -187,8 +188,9 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
                              train_graph_data.edge_attr, val_graph_data.edge_index,
                              val_neg_edge_index)
             
-            print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | '
-                  f'LR: {scheduler.get_last_lr()[0]:.6f}')
+            if print_info:
+                print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | Val AUC: {val_auc:.4f} | '
+                      f'LR: {scheduler.get_last_lr()[0]:.6f}')
             
             scheduler.step(val_auc)
             
@@ -203,18 +205,20 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
                 patience_counter += 1
             
             if patience_counter >= CONFIG['patience']:
-                print(f"Early stopping at epoch {epoch}")
+                if print_info:
+                    print(f"Early stopping at epoch {epoch}")
                 break
     
     # Load best model state from memory
     model.load_state_dict(best_model_state)
-    print(f"\nBest validation AUC: {best_val_auc:.4f}")
+    if print_info:
+        print(f"\nBest validation AUC: {best_val_auc:.4f}")
     
-    print("Testing...")
     best_test_auc = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
-    print(f"Test AUC: {best_test_auc:.4f}")
+    if print_info:
+        print(f"Test AUC: {best_test_auc:.4f}")
     
     # Return the metrics we want to track
     return {
@@ -225,90 +229,33 @@ def runner(base_lr=0.001, hidden_channels=32, num_layers=2,
     }
 
 def main():
-    # Define parameter grid
-    # param_grid = {
-    #     'base_lr': [0.0001, 0.001, 0.01],
-    #     'hidden_channels': [32, 64, 128],
-    #     'num_layers': [2, 3],
-    #     'dropout': [0.3, 0.5],
-    #     'out_channels': [16, 32]
-    # }
-    param_grid = {
-        'base_lr': [0.001],
-        'hidden_channels': [32],
-        'num_layers': [1, 2, 3],
-        'dropout': [0.25, 0.5, 0.75],
-        'out_channels': [16]
-    }
-    
-    # Generate all combinations
-    from itertools import product
-    param_names = list(param_grid.keys())
-    param_values = list(param_grid.values())
-    
-    best_val_auc = 0
-    best_config = None
-    best_test_auc = 0
-    
-    total_configs = np.prod([len(v) for v in param_values])
-    print(f"Starting grid search with {total_configs} configurations")
-    
-    # Run grid search
-    for i, values in enumerate(product(*param_values), 1):
-        current_config = dict(zip(param_names, values))
-        print(f"\nConfig {i}/{total_configs}:")
-        print(current_config)
-        
-        # Run experiment with current config
-        results = []
-        N_RUNS = 3  # Number of runs per config
-        
-        for run in range(N_RUNS):
-            run_results = runner(**current_config)  # Pass config to runner
-            results.append(run_results['final_val'])
-        
-        # Get mean validation AUC
-        mean_val_auc = np.mean(results)
-        std_val_auc = np.std(results)
-        print(f"Mean Val AUC: {mean_val_auc:.4f} ± {std_val_auc:.4f}")
-        
-        # Update best if needed
-        if mean_val_auc > best_val_auc:
-            best_val_auc = mean_val_auc
-            best_config = current_config.copy()
-            
-    # Final evaluation with best config
-    print("\nBest configuration found:")
-    print(best_config)
-    print(f"Best validation AUC: {best_val_auc:.4f}")
-    
-    # Run final evaluation with best config
-    print("\nFinal evaluation with best config:")
-    final_results = {
+    N_RUNS = 10
+    results = {
+        'untrained_val': [],
+        'untrained_test': [],
         'final_val': [],
         'final_test': []
     }
     
-    N_FINAL_RUNS = 5
-    for run in range(N_FINAL_RUNS):
-        run_results = runner(**best_config)
-        for metric in final_results:
-            final_results[metric].append(run_results[metric])
+    for run in range(N_RUNS):
+        print(f"Run {run + 1}/{N_RUNS}")
+        run_results = runner(
+            base_lr=0.0036, 
+            hidden_channels=256, 
+            num_layers=1, 
+            dropout=0.66, 
+            out_channels=128,
+            print_info=False
+        )
+        for metric in results:
+            results[metric].append(run_results[metric])
     
-    # Print final statistics
-    print(f"\nFinal Statistics over {N_FINAL_RUNS} runs with best config:")
-    for metric in final_results:
-        values = np.array(final_results[metric])
+    print("\nFinal Statistics over", N_RUNS, "runs:")
+    for metric in results:
+        values = np.array(results[metric])
         mean = np.mean(values)
         std = np.std(values)
         print(f"{metric}: {mean:.4f} ± {std:.4f}")
-
-    # Print best config in a more readable format
-    print("\nBest configuration details:")
-    print("-" * 30)
-    for param, value in best_config.items():
-        print(f"{param:15s}: {value}")
-    print("-" * 30)
 
 if __name__ == "__main__":
     main()

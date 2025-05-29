@@ -24,11 +24,11 @@ class OpenAlexGraphDataset:
             os.path.exists(self.val_cache_path) and \
             os.path.exists(self.test_cache_path)
         ):
-            print("Loading cached data...")
+            # print("Loading cached data...")
             self.train_data = torch.load(self.train_cache_path, weights_only=False)
             self.val_data = torch.load(self.val_cache_path, weights_only=False)
             self.test_data = torch.load(self.test_cache_path, weights_only=False)
-            print("Done!")
+            # print("Done!")
         else:
             print("Loading sentence model...")
             self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -184,3 +184,6 @@ class OpenAlexGraphDataset:
 
     def get_test_data(self):
         return self.test_data
+
+if __name__ == "__main__":
+    dataset = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
