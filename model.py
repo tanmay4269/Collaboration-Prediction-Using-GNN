@@ -25,11 +25,9 @@ class EdgeSAGEConv(MessagePassing):
 class LinkPredictionModel(torch.nn.Module):
     def __init__(self, in_channels_node, in_channels_edge, hidden_channels, num_layers, dropout, out_channels):
         super().__init__()
-        
-        # Build the layers list
         layers = []
         
-        # First layer (input to hidden)
+        # Input to hidden
         layers.append(EdgeSAGEConv(in_channels_node, hidden_channels, in_channels_edge))
         layers.append(nn.BatchNorm1d(hidden_channels))
         layers.append(nn.ReLU())
@@ -42,15 +40,13 @@ class LinkPredictionModel(torch.nn.Module):
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
         
-        # Final layer (hidden to output)
+        # Hidden to output
         layers.append(EdgeSAGEConv(hidden_channels, out_channels, in_channels_edge))
         layers.append(nn.BatchNorm1d(out_channels))
         
-        # Create sequential model
         self.layers = nn.ModuleList(layers)
 
     def forward(self, x, edge_index, edge_attr):
-        """Forward pass through all layers."""
         for layer in self.layers:
             if isinstance(layer, EdgeSAGEConv):
                 x = layer(x, edge_index, edge_attr)
@@ -59,7 +55,6 @@ class LinkPredictionModel(torch.nn.Module):
         return x
 
     def decode(self, z, edge_indices):
-        """Compute link predictions from node embeddings."""
         source_node_embeddings = z[edge_indices[0]]
         target_node_embeddings = z[edge_indices[1]]
         return (source_node_embeddings * target_node_embeddings).sum(dim=-1)

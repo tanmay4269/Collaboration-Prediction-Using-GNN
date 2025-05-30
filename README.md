@@ -1,59 +1,18 @@
-# iKIETS: Inductive Knowledge-Infused Edge Transformer for Scientific Collaboration
+# Colaboration Prediction Using GraphSAGE
 
-This project implements a graph neural network-based approach for predicting future scientific collaborations using the OpenAlex dataset. The model learns from historical collaboration patterns, author metadata, and institutional information to predict potential future collaborations between researchers.
+## Problem statement
+*Look into the [problem statement](docs/Problem%20Statement%20-%20I.pdf) for more details*
+An academic work like a research paper is built by various authors, given a graph connecting these authors by their collaboration on these works, the task that we are interested here is to predict the next collaboration for each author. 
 
-## Problem Statement
+## My solution
+This repository solves the above problem by making use of a graph neural network (GNN) that is trained on the standard task of link prediction. 
+- **Dataset**: I've used OpenAlex API to gather cse papers between 2020 and 2024, each author being a node with features such as total citations, work count, institute name embeddings and the edge features are the embeddings (using sentence transformer) of the title of the paper they collaborated on.
+    - Stats: ~2.7k nodes, ~43k edges
+- **Model**: A message passing algorithm that concatinates edge feature to the neighbours with their own node embeddings. The sturcture of the GNN resembles that of [GraphSAGE](https://arxiv.org/abs/1706.02216), and the decoding is done simply by taking dot product, that is, the logits for existance of a link between the nodes in consideration.
+- **Training**: Four splits have been used to be sure about generalization: train (70%), val (10%), dev-test (10%) and test (10%). These are split across time and on the edges. So train set includes first 70% edges temporally.
+    - For hyperpameter optimization, optuna has been used with `dev-test-roc / val-roc < 0.95` is the pruning criterion
 
-The task is to predict potential future collaborations between researchers in computer science based on their previous collaboration history and metadata. This is formulated as a link prediction problem in a dynamic graph where:
-- Nodes represent authors
-- Edges represent collaborations (co-authorship)
-- Node features include citation counts and publication counts
-- Edge features are derived from paper titles using sentence embeddings
-- Temporal splits are used to evaluate the model's predictive power
-
-## Components
-
-### Dataset (`dataset.py`)
-
-The `OpenAlexGraphDataset` class handles data processing and preparation:
-- Loads and processes JSON data from OpenAlex containing CS papers
-- Constructs a collaboration graph with authors as nodes
-- Computes node features:
-  - Citation counts (normalized)
-  - Work counts (normalized) 
-  - Institution embeddings using SentenceTransformer
-- Computes edge features from paper titles using SentenceTransformer
-- Implements temporal splitting (70% train, 10% val, 10% dev-test, 10% test)
-- Supports caching for faster loading
-
-### Model (`model.py`)
-
-The model architecture consists of:
-- Custom `EdgeSAGEConv` layer that extends MessagePassing:
-  - Processes both node and edge features
-  - Uses mean aggregation
-  - Combines neighbor and self information
-- `LinkPredictionModel` implementing the full architecture:
-  - Multiple EdgeSAGE layers with batch normalization
-  - Dropout for regularization
-  - Decoder for computing link probabilities
-  - Optimized for binary classification (link exists/doesn't exist)
-
-### Training (`main.py`)
-
-The training pipeline includes:
-- Negative sampling for generating non-existing edges
-- Early stopping based on validation performance
-- Learning rate scheduling
-- Multiple evaluation metrics (ROC-AUC and PR-AUC)
-- Support for multiple runs with different random seeds
-- Hyperparameter configuration
-
-## Results
-
-The following results show the model's performance across different dataset sizes (number of authors) for both untrained and trained states:
-
-# Experiment results
+# Experiment Results
 
 | Authors | Untrained Val roc_auc | Final Val roc_auc | Untrained Val pr_auc | Final Val pr_auc | Untrained Dev Test roc_auc | Final Dev Test roc_auc | Untrained Dev Test pr_auc | Final Dev Test pr_auc | Untrained Test roc_auc | Final Test roc_auc | Untrained Test pr_auc | Final Test pr_auc |
 | :------ | :-------------------- | :---------------- | :------------------- | :--------------- | :------------------------- | :--------------------- | :------------------------ | :-------------------- | :--------------------- | :----------------- | :-------------------- | :---------------- |
@@ -64,6 +23,6 @@ The following results show the model's performance across different dataset size
 | 1600    | 0.2783 ± 0.0700       | 0.8771 ± 0.0200   | 0.4322 ± 0.0264      | 0.8333 ± 0.0171  | 0.6412 ± 0.0477            | 0.8883 ± 0.0350        | 0.7199 ± 0.0742           | 0.8827 ± 0.0135       | 0.4838 ± 0.0726        | 0.7914 ± 0.0580    | 0.5916 ± 0.0603       | 0.8023 ± 0.0224   |
 | All (~2.7k)    | 0.5966 ± 0.0647       | 0.9450 ± 0.0102   | 0.6840 ± 0.0716      | 0.9251 ± 0.0114  | 0.4006 ± 0.0522            | 0.9013 ± 0.0210        | 0.5275 ± 0.0398           | 0.8624 ± 0.0205       | 0.5666 ± 0.0741        | 0.8670 ± 0.0296    | 0.6516 ± 0.0692       | 0.8524 ± 0.0226   |
 
-![PR AUC Results](results/pr-auc.png)
-![ROC AUC Results](results/roc-auc.png)
+![PR AUC Results](docs/results/pr-auc.png)
+![ROC AUC Results](docs/results/roc-auc.png)
 
