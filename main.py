@@ -287,11 +287,11 @@ def main(dataset_builder=None, config=None, N_RUNS=10):
         # print(f"Run {run + 1}/{N_RUNS}")
         run_results = runner(
             dataset_builder=dataset_builder,
-            base_lr=0.0079, 
-            hidden_channels=256, 
-            num_layers=2, 
-            dropout=0.29, 
-            out_channels=128,
+            base_lr=config['base_lr'], 
+            hidden_channels=config['hidden_channels'], 
+            num_layers=config['num_layers'], 
+            dropout=config['dropout'], 
+            out_channels=config['out_channels'],
             print_info=False
         )
         
@@ -313,4 +313,10 @@ def main(dataset_builder=None, config=None, N_RUNS=10):
     print("-" * 50)
 
 if __name__ == "__main__":
-    main()
+    main(config={
+        'base_lr': 0.0079, 
+        'hidden_channels': 256, 
+        'num_layers': 2, 
+        'dropout': 0.29, 
+        'out_channels': 128
+    })
