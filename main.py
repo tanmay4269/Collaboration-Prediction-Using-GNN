@@ -291,17 +291,17 @@ def main(dataset_builder=None, N_RUNS=2):
             num_layers=1, 
             dropout=0.66, 
             out_channels=128,
-            print_info=False
+            print_info=True
         )
         
         # Collect all metrics
-        for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_test']:
+        for phase in ['untrained_val', 'untrained_dev_test', 'untrained_test', 'final_val', 'final_dev_test', 'final_test']:
             for metric in metrics:
                 results[f'{phase}_{metric}'].append(run_results[phase][metric])
     
     print(f"\nFinal Statistics over {N_RUNS} runs with the best config:")
     print("-" * 50)
-    for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_dev_test', 'final_test']:
+    for phase in ['untrained_val', 'untrained_dev_test', 'untrained_test', 'final_val', 'final_dev_test', 'final_test']:
         print(f"\n{phase.replace('_', ' ').title()}:")
         for metric in metrics:
             key = f'{phase}_{metric}'
