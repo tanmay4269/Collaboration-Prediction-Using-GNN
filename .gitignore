@@ -4,3 +4,4 @@ testing/dataset
 cache
 *.pt
 *.log
+archives
