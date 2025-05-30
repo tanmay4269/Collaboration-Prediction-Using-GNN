@@ -117,6 +117,7 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     # Load dataset
     train_graph_data = dataset_builder.get_train_data()
     val_graph_data = dataset_builder.get_val_data()
+    dev_test_graph_data = dataset_builder.get_dev_test_data()
     test_graph_data = dataset_builder.get_test_data()
     
     # Pre-compute negative edges
@@ -127,8 +128,15 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
         method='sparse'
     ).cuda()
     
-    test_neg_edge_index = negative_sampling(
+    dev_test_neg_edge_index = negative_sampling(
         edge_index=torch.cat([train_graph_data.edge_index, val_graph_data.edge_index], dim=1),
+        num_nodes=train_graph_data.num_nodes,
+        num_neg_samples=dev_test_graph_data.edge_index.size(1),
+        method='sparse'
+    ).cuda()
+
+    test_neg_edge_index = negative_sampling(
+        edge_index=torch.cat([train_graph_data.edge_index, val_graph_data.edge_index, dev_test_graph_data.edge_index], dim=1),
         num_nodes=train_graph_data.num_nodes,
         num_neg_samples=test_graph_data.edge_index.size(1),
         method='sparse'
@@ -169,19 +177,24 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     untrained_val_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                       train_graph_data.edge_attr, val_graph_data.edge_index,
                       val_neg_edge_index)
+    untrained_dev_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+                      train_graph_data.edge_attr, dev_test_graph_data.edge_index,
+                      dev_test_neg_edge_index)
     untrained_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
                        test_neg_edge_index)
     if print_info:
         print(f"Untrained Metrics:")
         print(f"  Val  - ROC-AUC: {untrained_val_metrics['roc_auc']:.4f}, PR-AUC: {untrained_val_metrics['pr_auc']:.4f}")
+        print(f"  Dev-Test - ROC-AUC: {untrained_dev_test_metrics['roc_auc']:.4f}, PR-AUC: {untrained_dev_test_metrics['pr_auc']:.4f}")
         print(f"  Test - ROC-AUC: {untrained_test_metrics['roc_auc']:.4f}, PR-AUC: {untrained_test_metrics['pr_auc']:.4f}")
     
     # Training loop
     best_val_auc = 0
     patience_counter = 0
     best_model_state = None
-    best_metrics = None
+    best_val_metrics = None
+    best_dev_test_metrics = None
     
     for epoch in range(CONFIG['num_epochs']):
         loss = train(train_graph_data, model, optimizer)
@@ -190,18 +203,25 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
             val_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                              train_graph_data.edge_attr, val_graph_data.edge_index,
                              val_neg_edge_index)
+            dev_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
+                             train_graph_data.edge_attr, dev_test_graph_data.edge_index,
+                             dev_test_neg_edge_index)
             
             if print_info:
                 print(f'Epoch {epoch:03d} | Loss: {loss:.4f} | '
                       f'Val ROC-AUC: {val_metrics["roc_auc"] :.4f}, '
-                      f'PR-AUC: {val_metrics["pr_auc"] :.4f} | '
+                      f'Val PR-AUC: {val_metrics["pr_auc"] :.4f} | '
+                      f'Dev-Test ROC-AUC: {dev_test_metrics["roc_auc"] :.4f}, '
+                      f'Dev-Test PR-AUC: {dev_test_metrics["pr_auc"] :.4f} | '
                       f'LR: {scheduler.get_last_lr()[0]:.6f}')
             
             scheduler.step(val_metrics['roc_auc'])
             
             if val_metrics['roc_auc'] > best_val_auc:
                 best_val_auc = val_metrics['roc_auc']
-                best_metrics = val_metrics
+                best_val_metrics = val_metrics
+                best_dev_test_metrics = dev_test_metrics
+                
                 patience_counter = 0
                 best_model_state = {
                     k: v.cpu().clone() for k, v in model.state_dict().items()
@@ -218,8 +238,10 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     model.load_state_dict(best_model_state)
     if print_info:
         print(f"\nBest validation metrics:")
-        print(f"  ROC-AUC: {best_metrics['roc_auc']:.4f}")
-        print(f"  PR-AUC:  {best_metrics['pr_auc']:.4f}")
+        print(f"  ROC-AUC: {best_val_metrics['roc_auc']:.4f}")
+        print(f"  PR-AUC:  {best_val_metrics['pr_auc']:.4f}")
+        print(f"  Dev-Test ROC-AUC: {best_dev_test_metrics['roc_auc']:.4f}")
+        print(f"  Dev-Test PR-AUC: {best_dev_test_metrics['pr_auc']:.4f}")
     
     final_test_metrics = evaluate(model, train_graph_data.x, train_graph_data.edge_index,
                        train_graph_data.edge_attr, test_graph_data.edge_index,
@@ -232,22 +254,31 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
     # Return all metrics
     return {
         'untrained_val': untrained_val_metrics,
+        'untrained_dev_test': untrained_dev_test_metrics,
         'untrained_test': untrained_test_metrics,
-        'final_val': best_metrics,
+        'final_val': best_val_metrics,
+        'final_dev_test': best_dev_test_metrics,
         'final_test': final_test_metrics
     }
 
-def main(dataset_builder=None, N_RUNS=10):
+def main(dataset_builder=None, N_RUNS=2):
     metrics = ['roc_auc', 'pr_auc']
     results = {
         f'untrained_val_{m}': [] for m in metrics
     }
     results.update({f'untrained_test_{m}': [] for m in metrics})
     results.update({f'final_val_{m}': [] for m in metrics})
+    results.update({f'final_dev_test_{m}': [] for m in metrics})
     results.update({f'final_test_{m}': [] for m in metrics})
     
     if dataset_builder is None:
-        dataset_builder = OpenAlexGraphDataset()
+        dataset_builder = OpenAlexGraphDataset(
+            num_authors=-1,
+            use_cache=False,
+            use_citation_count=True,
+            use_work_count=False,
+            use_institution_embedding=True
+        )
     
     for run in range(N_RUNS):
         seed_everything(run)
@@ -270,7 +301,7 @@ def main(dataset_builder=None, N_RUNS=10):
     
     print(f"\nFinal Statistics over {N_RUNS} runs with the best config:")
     print("-" * 50)
-    for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_test']:
+    for phase in ['untrained_val', 'untrained_test', 'final_val', 'final_dev_test', 'final_test']:
         print(f"\n{phase.replace('_', ' ').title()}:")
         for metric in metrics:
             key = f'{phase}_{metric}'

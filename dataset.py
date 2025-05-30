@@ -50,7 +50,7 @@ class OpenAlexGraphDataset:
 
             print("Building datasets...")
             G = self._build_networkx_graph(json_path, max_num_nodes=num_authors)
-            self.train_data, self.val_data, self.test_data = self._create_splits(G)
+            self.train_data, self.val_data, self.dev_test_data, self.test_data = self._create_splits(G)
             print("Done!")
 
             print(f"Saving processed data to {self.cache_dir}...")
@@ -174,29 +174,35 @@ class OpenAlexGraphDataset:
 
         all_edges_with_dates.sort(key=lambda x: x[1])
 
+        # 70% train, 10% val, 10% dev-test, 10% test
         num_edges = len(all_edges_with_dates)
-        train_end_idx = int(num_edges * 0.6)
+        train_end_idx = int(num_edges * 0.7)
         val_end_idx = int(num_edges * 0.8)
+        dev_test_end_idx = int(num_edges * 0.9)
 
         train_edges_with_dates = all_edges_with_dates[:train_end_idx]
         val_edges_with_dates = all_edges_with_dates[train_end_idx:val_end_idx]
-        test_edges_with_dates = all_edges_with_dates[val_end_idx:]
+        dev_test_edges_with_dates = all_edges_with_dates[val_end_idx:dev_test_end_idx]
+        test_edges_with_dates = all_edges_with_dates[dev_test_end_idx:]
 
         train_edges = list(set([edge for edge, _ in train_edges_with_dates]))
         val_edges = list(set([edge for edge, _ in val_edges_with_dates]))
+        dev_test_edges = list(set([edge for edge, _ in dev_test_edges_with_dates]))
         test_edges = list(set([edge for edge, _ in test_edges_with_dates]))
 
         node_features, node_to_idx = self._process_node_features(G)
 
         train_edge_indices, train_edge_features = self._process_edge_features(G, node_to_idx, train_edges)
         val_edge_indices, val_edge_features = self._process_edge_features(G, node_to_idx, val_edges)
+        dev_test_edge_indices, dev_test_edge_features = self._process_edge_features(G, node_to_idx, dev_test_edges)
         test_edge_indices, test_edge_features = self._process_edge_features(G, node_to_idx, test_edges)
 
         train_data = Data(x=node_features, edge_index=train_edge_indices, edge_attr=train_edge_features)
         val_data = Data(x=node_features, edge_index=val_edge_indices, edge_attr=val_edge_features)
+        dev_test_data = Data(x=node_features, edge_index=dev_test_edge_indices, edge_attr=dev_test_edge_features)
         test_data = Data(x=node_features, edge_index=test_edge_indices, edge_attr=test_edge_features)
 
-        return train_data, val_data, test_data
+        return train_data, val_data, dev_test_data, test_data
 
     def get_train_data(self):
         return self.train_data
@@ -204,8 +210,12 @@ class OpenAlexGraphDataset:
     def get_val_data(self):
         return self.val_data
 
+    def get_dev_test_data(self):
+        return self.dev_test_data
+
     def get_test_data(self):
         return self.test_data
-
+    
 if __name__ == "__main__":
+    # dataset = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=True)
     dataset = OpenAlexGraphDataset(json_path="data/openalex_cs_papers.json", num_authors=-1, use_cache=False)
