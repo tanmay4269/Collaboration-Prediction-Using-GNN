@@ -261,7 +261,7 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
         'final_test': final_test_metrics
     }
 
-def main(dataset_builder=None, N_RUNS=10):
+def main(dataset_builder=None, config=None, N_RUNS=10):
     metrics = ['roc_auc', 'pr_auc']
     results = {
         f'untrained_val_{m}': [] for m in metrics

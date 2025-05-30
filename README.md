@@ -10,9 +10,10 @@ This repository solves the above problem by making use of a graph neural network
     - Stats: ~2.7k nodes, ~43k edges
 - **Model**: A message passing algorithm that concatinates edge feature to the neighbours with their own node embeddings. The sturcture of the GNN resembles that of [GraphSAGE](https://arxiv.org/abs/1706.02216), and the decoding is done simply by taking dot product, that is, the logits for existance of a link between the nodes in consideration.
 - **Training**: Four splits have been used to be sure about generalization: train (70%), val (10%), dev-test (10%) and test (10%). These are split across time and on the edges. So train set includes first 70% edges temporally.
-    - For hyperpameter optimization, optuna has been used with `dev-test-roc / val-roc < 0.95` is the pruning criterion
+    - For hyperpameter optimization, optuna has been used with `dev-test-roc / val-roc < 0.95` as the pruning criterion.
 
 # Experiment Results
+*For additional details, read the `experiments.ipynb` notebook*
 
 | Authors | Untrained Val roc_auc | Final Val roc_auc | Untrained Val pr_auc | Final Val pr_auc | Untrained Dev Test roc_auc | Final Dev Test roc_auc | Untrained Dev Test pr_auc | Final Dev Test pr_auc | Untrained Test roc_auc | Final Test roc_auc | Untrained Test pr_auc | Final Test pr_auc |
 | :------ | :-------------------- | :---------------- | :------------------- | :--------------- | :------------------------- | :--------------------- | :------------------------ | :-------------------- | :--------------------- | :----------------- | :-------------------- | :---------------- |
@@ -25,4 +26,6 @@ This repository solves the above problem by making use of a graph neural network
 
 ![PR AUC Results](docs/results/pr-auc.png)
 ![ROC AUC Results](docs/results/roc-auc.png)
-
+![Node Features](docs/results/node_feats.png)
+![Edge Features](docs/results/edge_feats.png)
+![Model Hyperparameters](docs/results/model_hpt.png)

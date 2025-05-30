@@ -17,9 +17,14 @@ class OpenAlexGraphDataset:
         num_authors=-1,
         cache_dir="cache",
         use_cache=True,
+
         use_citation_count=True,
         use_work_count=True,
-        use_institution_embedding=True
+        use_institution_embedding=True,
+
+        use_subfield_embedding=False,
+        use_field_embedding=False,
+        use_title_embedding=True,
     ):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -27,6 +32,14 @@ class OpenAlexGraphDataset:
         self.use_citation_count = use_citation_count
         self.use_work_count = use_work_count
         self.use_institution_embedding = use_institution_embedding
+
+        self.use_subfield_embedding = use_subfield_embedding
+        self.use_field_embedding = use_field_embedding
+        self.use_title_embedding = use_title_embedding
+
+        # Store unique subfields and fields
+        self.unique_subfields = set()
+        self.unique_fields = set()
 
         self.train_cache_path = os.path.join(self.cache_dir, "train_data.pt")
         self.val_cache_path = os.path.join(self.cache_dir, "val_data.pt")
@@ -77,6 +90,17 @@ class OpenAlexGraphDataset:
             
             publication_date = datetime.strptime(publication_date_str, '%Y-%m-%d')
 
+            # Extract topics information
+            subfields = []
+            fields = []
+            for topic_dict in work['topics']:
+                subfields.append(topic_dict['subfield']['id'])
+                fields.append(topic_dict['field']['id'])
+            
+            # Update unique subfields and fields
+            self.unique_subfields.update(subfields)
+            self.unique_fields.update(fields)
+
             for author_data in work["authorships"]:
                 author_id = author_data["author"]["id"]
                 affiliation = (
@@ -103,10 +127,14 @@ class OpenAlexGraphDataset:
                     if G.has_edge(id_1, id_2):
                         G[id_1][id_2]["title"].append(authors[i]["title"])
                         G[id_1][id_2]["publication_dates"].append(publication_date)
+                        G[id_1][id_2]["subfields"].append(subfields)
+                        G[id_1][id_2]["fields"].append(fields)
                     else:
                         G.add_edge(id_1, id_2)
                         G[id_1][id_2]["title"] = [authors[i]["title"]]
                         G[id_1][id_2]["publication_dates"] = [publication_date]
+                        G[id_1][id_2]["subfields"] = [subfields]
+                        G[id_1][id_2]["fields"] = [fields]
                         
         if max_num_nodes < 0:
             return G
@@ -160,12 +188,38 @@ class OpenAlexGraphDataset:
 
         batched_title_embeddings = self.sentence_model.encode(all_individual_titles, convert_to_tensor=True).to('cuda')
 
+        # Convert unique subfields and fields to ordered lists for consistent indexing
+        subfield_list = sorted(list(self.unique_subfields))
+        field_list = sorted(list(self.unique_fields))
+        subfield_to_idx = {sf: i for i, sf in enumerate(subfield_list)}
+        field_to_idx = {f: i for i, f in enumerate(field_list)}
+
         edge_features_list = []
         for i, (u, v) in enumerate(edge_list):
-            start_idx, end_idx = title_slices[i]
-            individual_embeddings_for_edge = batched_title_embeddings[start_idx:end_idx]
-            averaged_embedding = individual_embeddings_for_edge.mean(dim=0)
-            edge_features_list.append(averaged_embedding)
+            feats = []
+
+            if self.use_subfield_embedding:
+                subfield_vec = torch.zeros(len(subfield_list), dtype=torch.float).to('cuda') 
+                edge_subfields = [sf for subfields_list in G[u][v]['subfields'] for sf in subfields_list]
+                for sf in edge_subfields:
+                    subfield_vec[subfield_to_idx[sf]] = 1.0
+                feats.append(subfield_vec)
+
+            if self.use_field_embedding:
+                field_vec = torch.zeros(len(field_list), dtype=torch.float).to('cuda')
+                edge_fields = [f for fields_list in G[u][v]['fields'] for f in fields_list]
+                for f in edge_fields:
+                    field_vec[field_to_idx[f]] = 1.0
+                feats.append(field_vec)
+            
+            if self.use_title_embedding:
+                start_idx, end_idx = title_slices[i]
+                individual_embeddings_for_edge = batched_title_embeddings[start_idx:end_idx]
+                averaged_embedding = individual_embeddings_for_edge.mean(dim=0)
+                feats.append(averaged_embedding)
+
+            edge_feature = torch.cat(feats) if feats else torch.zeros(1).cuda()
+            edge_features_list.append(edge_feature)
 
         edge_features = torch.stack(edge_features_list)
         return edge_indices, edge_features

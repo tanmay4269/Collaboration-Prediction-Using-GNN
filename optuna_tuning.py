@@ -3,15 +3,16 @@ import numpy as np
 from main import runner, seed_everything
 from dataset import OpenAlexGraphDataset
 
-def main():
-    dataset_builder = OpenAlexGraphDataset(
-        num_authors=-1,
-        # use_cache=True,
-        use_cache=False,
-        use_citation_count=True,
-        use_work_count=True,
-        use_institution_embedding=True
-    )
+def main(dataset_builder=None):
+    if dataset_builder is None:
+        dataset_builder = OpenAlexGraphDataset(
+            num_authors=-1,
+            # use_cache=True,
+            use_cache=False,
+            use_citation_count=True,
+            use_work_count=True,
+            use_institution_embedding=True
+        )
     
     def objective(trial: optuna.trial.Trial) -> float:
         base_lr = trial.suggest_float("base_lr", 1e-4, 1e-2, log=True)
