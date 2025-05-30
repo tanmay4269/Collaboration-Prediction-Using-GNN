@@ -261,11 +261,12 @@ def runner(dataset_builder, base_lr=0.001, hidden_channels=32, num_layers=2,
         'final_test': final_test_metrics
     }
 
-def main(dataset_builder=None, N_RUNS=2):
+def main(dataset_builder=None, N_RUNS=10):
     metrics = ['roc_auc', 'pr_auc']
     results = {
         f'untrained_val_{m}': [] for m in metrics
     }
+    results.update({f'untrained_dev_test_{m}': [] for m in metrics})
     results.update({f'untrained_test_{m}': [] for m in metrics})
     results.update({f'final_val_{m}': [] for m in metrics})
     results.update({f'final_dev_test_{m}': [] for m in metrics})
@@ -273,25 +274,25 @@ def main(dataset_builder=None, N_RUNS=2):
     
     if dataset_builder is None:
         dataset_builder = OpenAlexGraphDataset(
-            num_authors=-1,
+            num_authors=200,
             use_cache=False,
             use_citation_count=True,
-            use_work_count=False,
+            use_work_count=True,
             use_institution_embedding=True
         )
     
     for run in range(N_RUNS):
         seed_everything(run)
         
-        print(f"Run {run + 1}/{N_RUNS}")
+        # print(f"Run {run + 1}/{N_RUNS}")
         run_results = runner(
             dataset_builder=dataset_builder,
-            base_lr=0.0036, 
+            base_lr=0.0079, 
             hidden_channels=256, 
-            num_layers=1, 
-            dropout=0.66, 
+            num_layers=2, 
+            dropout=0.29, 
             out_channels=128,
-            print_info=True
+            print_info=False
         )
         
         # Collect all metrics

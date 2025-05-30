@@ -30,16 +30,19 @@ class OpenAlexGraphDataset:
 
         self.train_cache_path = os.path.join(self.cache_dir, "train_data.pt")
         self.val_cache_path = os.path.join(self.cache_dir, "val_data.pt")
+        self.dev_test_cache_path = os.path.join(self.cache_dir, "dev_test_data.pt")
         self.test_cache_path = os.path.join(self.cache_dir, "test_data.pt")
 
         if use_cache and (
             os.path.exists(self.train_cache_path) and \
             os.path.exists(self.val_cache_path) and \
+            os.path.exists(self.dev_test_cache_path) and \
             os.path.exists(self.test_cache_path)
         ):
             # print("Loading cached data...")
             self.train_data = torch.load(self.train_cache_path, weights_only=False)
             self.val_data = torch.load(self.val_cache_path, weights_only=False)
+            self.dev_test_data = torch.load(self.dev_test_cache_path, weights_only=False)
             self.test_data = torch.load(self.test_cache_path, weights_only=False)
             # print("Done!")
         else:
@@ -56,6 +59,7 @@ class OpenAlexGraphDataset:
             print(f"Saving processed data to {self.cache_dir}...")
             torch.save(self.train_data, self.train_cache_path)
             torch.save(self.val_data, self.val_cache_path)
+            torch.save(self.dev_test_data, self.dev_test_cache_path)
             torch.save(self.test_data, self.test_cache_path)
             print("Done!")
     
